@@ -25,6 +25,9 @@
 #if !defined(_PA_CONNECTOR_H)
 #define _PA_CONNECTOR_H
 
+#include "nasspmp_api.h"
+#include "replication/ReplicationHub.h"
+
 ///
 /// \ingroup Connectors
 /// \brief Connector type.
@@ -306,6 +309,13 @@ public:
 	///
 	bool ValidateVessel();
 
+	// Returns whether this vessel's canonical hub role is Replica.
+	bool IsMultiplayerReplica() const { return ReplicationHubInstance.GetRole() == ReplicationRole::Replica; }
+
+	// Returns the non-owning provider hub for this vessel entity.
+	ReplicationHub &GetReplicationHub() { return ReplicationHubInstance; }
+	const ReplicationHub &GetReplicationHub() const { return ReplicationHubInstance; }
+
 	///
 	/// \brief Set up connectors on docking.
 	///
@@ -340,6 +350,9 @@ protected:
 #define PACV_N_CONNECTORS 16
 
 	ConnectorDefinition ConnectorList[PACV_N_CONNECTORS];
+
+	// Owns the registration and role boundary for this replicated vessel entity.
+	ReplicationHub ReplicationHubInstance;
 };
 
 ///

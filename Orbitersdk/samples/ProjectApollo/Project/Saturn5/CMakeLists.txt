@@ -40,6 +40,7 @@ set(SOURCES
     ${NASSP_SOURCE_ROOT}/src_csm/sce.cpp
     ${NASSP_SOURCE_ROOT}/src_csm/scs.cpp
     ${NASSP_SOURCE_ROOT}/src_csm/saturn.cpp
+    ${NASSP_SOURCE_ROOT}/src_csm/CsmReplicationProviders.cpp
     ${NASSP_SOURCE_ROOT}/src_csm/satswitches.cpp
     ${NASSP_SOURCE_ROOT}/src_csm/satsystems.cpp
     ${NASSP_SOURCE_ROOT}/src_csm/saturnmesh.cpp
@@ -86,6 +87,7 @@ set(SOURCES
     ${NASSP_SOURCE_ROOT}/src_sys/MalfunctionSimulation.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/mechanicalaccelerometer.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/missiontimer.cpp
+    ${NASSP_SOURCE_ROOT}/src_sys/NasspReplicationBridge.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/ordeal.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/soundevents.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/soundlib.cpp

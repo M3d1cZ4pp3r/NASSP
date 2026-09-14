@@ -262,6 +262,9 @@ ProjectApolloConnectorVessel::ProjectApolloConnectorVessel(OBJHANDLE hObj, int f
 
 ProjectApolloConnectorVessel::~ProjectApolloConnectorVessel()
 {
+	// Clearing stale non-owning entries is safe because UnregisterAll() does not dereference providers.
+	ReplicationHubInstance.UnregisterAll();
+
 	//Disconnect all connectors
 	int i;
 	for (i = 0; i < PACV_N_CONNECTORS; i++)

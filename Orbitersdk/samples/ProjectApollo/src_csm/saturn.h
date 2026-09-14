@@ -37,6 +37,7 @@
 #include "csmconnector.h"
 #include "cautionwarning.h"
 #include "csmcautionwarning.h"
+#include "CsmReplicationProviders.h"
 #include "missiontimer.h"
 #include "FDAI.h"
 #include "dsky.h"
@@ -3967,6 +3968,7 @@ protected:
 	IU* iu;
 	SIVBSystems *sivb;
 	CSMCautionWarningSystem cws;
+	PanelControlProvider panelControlProvider;
 
 	DockingProbe dockingprobe;
 	SECS secs;
@@ -4709,6 +4711,7 @@ protected:
 
 	// InitSaturn is called twice, but some things must run only once
 	bool InitSaturnCalled;
+	void RegisterReplicationProviders();
 
 #define SISYSTEMS_START_STRING		"SISYSTEMS_BEGIN"
 #define SISYSTEMS_END_STRING		"SISYSTEMS_END"

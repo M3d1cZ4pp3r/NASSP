@@ -56,6 +56,7 @@ CautionWarningSystem::CautionWarningSystem(Sound &mastersound, Sound &buttonsoun
 	MasterAlarm = false;
 	MasterAlarmLit = false;
 	MasterAlarmPressed = false;
+	ReplicatedMasterAlarmBits = 0;
 	InhibitNextMasterAlarm = false;
 	PlaySounds = true;
 
@@ -199,18 +200,37 @@ void CautionWarningSystem::RenderMasterAlarm(SURFHANDLE surf, SURFHANDLE alarmLi
 	// In Boost-Mode only the left master alarm button is not illuminated (Apollo Operations Handbook 2.10.3)
 	// The left/right lamp test illuminates the left/right master alarm button on the main panel (Apollo Operations Handbook 2.10.3)
 
-	if (LightsPowered() && (
-	       (MasterAlarmLit && (MasterAlarmLightEnabled || position != CWS_MASTERALARMPOSITION_LEFT)) || 
-	       (TestState == CWS_TEST_LIGHTS_LEFT && position == CWS_MASTERALARMPOSITION_LEFT && MasterAlarmLightEnabled) ||
-	       (TestState == CWS_TEST_LIGHTS_RIGHT && position == CWS_MASTERALARMPOSITION_RIGHT)
-	   )) {
-		//
-		// Draw the master alarm lit bitmap.
-		//
+	if (UsesReplicatedMasterAlarmState()) {
+		const int positionBit = position == CWS_MASTERALARMPOSITION_LEFT ? 1 : 2;
+		if (ReplicatedMasterAlarmBits & positionBit)
+			oapiBlt(surf, alarmLit, 0, 0, 0, 0, 45*TexMul, 36*TexMul);
+	}
+	else if (LightsPowered() && (
+		(MasterAlarmLit && (MasterAlarmLightEnabled || position != CWS_MASTERALARMPOSITION_LEFT)) ||
+		(TestState == CWS_TEST_LIGHTS_LEFT && position == CWS_MASTERALARMPOSITION_LEFT && MasterAlarmLightEnabled) ||
+		(TestState == CWS_TEST_LIGHTS_RIGHT && position == CWS_MASTERALARMPOSITION_RIGHT))) {
 		oapiBlt(surf, alarmLit, 0, 0, 0, 0, 45*TexMul, 36*TexMul);
 	}
 	if (border)
 		oapiBlt(surf, border, 0, 0, 0, 0, 45*TexMul, 36*TexMul, SURF_PREDEF_CK);
+}
+
+int CautionWarningSystem::GetDisplayedMasterAlarmBits()
+{
+	if (UsesReplicatedMasterAlarmState())
+		return ReplicatedMasterAlarmBits;
+
+	if (!LightsPowered())
+		return 0;
+	int bits = 0;
+	if ((MasterAlarmLit && MasterAlarmLightEnabled) ||
+		(TestState == CWS_TEST_LIGHTS_LEFT && MasterAlarmLightEnabled))
+		bits |= 1;
+	if (MasterAlarmLit || TestState == CWS_TEST_LIGHTS_RIGHT)
+		bits |= 2;
+	if (MasterAlarm)
+		bits |= 4;
+	return bits;
 }
 
 bool CautionWarningSystem::CheckMasterAlarmMouseClick(int event)
@@ -236,6 +256,20 @@ void CautionWarningSystem::PushMasterAlarm()
 		SetMasterAlarm(false);
 	}
 	ButtonSound.play(NOLOOP);
+}
+
+void CautionWarningSystem::ApplyRemoteMasterAlarmPressed(bool pressed)
+{
+	if (pressed && !MasterAlarmPressed)
+		PushMasterAlarm();
+	MasterAlarmPressed = pressed;
+}
+
+void CautionWarningSystem::ApplyReplicatedMasterAlarmPressed(bool pressed)
+{
+	if (pressed && !MasterAlarmPressed)
+		ButtonSound.play(NOLOOP);
+	MasterAlarmPressed = pressed;
 }
 
 

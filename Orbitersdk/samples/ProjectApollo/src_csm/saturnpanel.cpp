@@ -3831,6 +3831,8 @@ bool Saturn::clbkPanelMouseEvent (int id, int event, int mx, int my)
 }
 
 void Saturn::PanelSwitchToggled(TwoPositionSwitch *s) {
+	if (IsMultiplayerReplica())
+		return;
 
 	if (s == &FuelCellRadiators1Switch) {
 		if (FuelCell1RadCB.IsPowered()) {
@@ -4021,6 +4023,8 @@ void Saturn::PanelSwitchToggled(TwoPositionSwitch *s) {
 }
 
 void Saturn::PanelIndicatorSwitchStateRequested(IndicatorSwitch *s) {
+	if (IsMultiplayerReplica())
+		return;
 
 	if (s == &FuelCellPhIndicator) {
 		if (stage <= CSM_LEM_STAGE && FuelCell1PumpsACCB.IsPowered())
@@ -4031,7 +4035,7 @@ void Saturn::PanelIndicatorSwitchStateRequested(IndicatorSwitch *s) {
 	} else if (s == &FuelCellRadTempIndicator) {
 		FuelCellStatus fc;
 		GetFuelCellStatus(FuelCellIndicatorsSwitch.GetState() + 1, fc);
-		if (fc.CoolingTempF < -30.0 || stage > CSM_LEM_STAGE)	// indication if temperature below -30°F
+		if (fc.CoolingTempF < -30.0 || stage > CSM_LEM_STAGE)	// indication if temperature below -30Â°F
 			FuelCellRadTempIndicator.SetState(0);
 		else
 			FuelCellRadTempIndicator.SetState(1);
@@ -4096,6 +4100,8 @@ void Saturn::PanelIndicatorSwitchStateRequested(IndicatorSwitch *s) {
 }
 
 void Saturn::PanelRotationalSwitchChanged(RotationalSwitch *s) {
+	if (IsMultiplayerReplica())
+		return;
 
 	if (s == &BatteryChargeRotary) {
 		if (s->GetState() == 1 && MainBusTieBatAcSwitch.IsDown()) 
@@ -6172,7 +6178,7 @@ void Saturn::InitSwitches() {
 	StabContSystemAc1CircuitBraker.Register(PSH, "StabContSystemAc1CircuitBraker", 1);
 	StabContSystemAc2CircuitBraker.Register(PSH, "StabContSystemAc2CircuitBraker", 1);
 
-	ECATVCAc2CircuitBraker.Register(PSH, "StabContSystemTVCAc1CircuitBraker", 1);
+	ECATVCAc2CircuitBraker.Register(PSH, "ECATVCAc2CircuitBraker", 1);
 	DirectUllMnACircuitBraker.Register(PSH, "DirectUllMnACircuitBraker", 1);
 	DirectUllMnBCircuitBraker.Register(PSH, "DirectUllMnBCircuitBraker", 1);
 	ContrDirectMnA1CircuitBraker.Register(PSH, "ContrDirectMnA1CircuitBraker", 1);

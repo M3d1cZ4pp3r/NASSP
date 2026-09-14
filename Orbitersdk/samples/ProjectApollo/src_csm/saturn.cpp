@@ -31,6 +31,7 @@
 #include <time.h>
 
 #include "soundlib.h"
+#include "NasspReplicationBridge.h"
 #include "resource.h"
 #include "nasspdefs.h"
 #include "nasspsound.h"
@@ -563,7 +564,8 @@ Saturn::Saturn(OBJHANDLE hObj, int fmodel) : ProjectApolloConnectorVessel (hObj,
 	DockProbeTempSensor("Docking-Probe-Temp-Sensor", -100.0, 300.0),
 	vesim(&cbCSMVesim, this),
 	CueCards(vcidx, this, 17),
-	Failures(this)
+	Failures(this),
+	panelControlProvider(PSH)
 #pragma warning ( pop ) // disable:4355
 
 {	
@@ -612,6 +614,9 @@ Saturn::~Saturn()
 
 {
 	TRACESETUP("~Saturn");
+
+	// Remove non-owning provider routes while the Saturn subsystem members are still alive.
+	GetReplicationHub().UnregisterAll();
 
 	ReleaseSurfaces();
 	ReleaseSurfacesVC();
@@ -1261,6 +1266,8 @@ void Saturn::initSaturn()
 
 		// Switch to compatible dock mode 
 		SetDockMode(0);
+
+		RegisterReplicationProviders();
 	}
 
 	for (int i = 0;i < 8;i++)
@@ -1269,6 +1276,24 @@ void Saturn::initSaturn()
 	}
 
 	InitSaturnCalled = true;
+}
+
+void Saturn::RegisterReplicationProviders()
+{
+	ReplicationHub &hub = GetReplicationHub();
+	const ReplicationHub::RegistrationResult panelResult = hub.Register(panelControlProvider);
+	if (panelResult != ReplicationHub::RegistrationResult::Success)
+		return;
+
+	const ReplicationHub::RegistrationResult cautionWarningResult = hub.Register(cws);
+	if (cautionWarningResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult sealResult = hub.SealCatalog();
+	if (sealResult != ReplicationHub::RegistrationResult::Success)
+		hub.UnregisterAll();
 }
 
 void Saturn::clbkPostCreation()
@@ -1668,32 +1693,34 @@ void Saturn::clbkPostStep(double simt, double simdt, double mjd)
 		debugConnected = true;
 	}
 
-	inertialData.Timestep(simdt);
+	if (!IsMultiplayerReplica()) {
+		inertialData.Timestep(simdt);
 
-	if (stage >= PRELAUNCH_STAGE && !GenericFirstTimestep) {
+		if (stage >= PRELAUNCH_STAGE && !GenericFirstTimestep) {
 
-		//
-		// The SPS engine must be in post time step 
-		// to inhibit Orbiter's thrust control
-		//
+			//
+			// The SPS engine must be in post time step
+			// to inhibit Orbiter's thrust control
+			//
 
-		SPSEngine.Timestep(SimulatedTime, simdt);
+			SPSEngine.Timestep(SimulatedTime, simdt);
 
-		// Better acceleration measurement stability
-		imu.Timestep(simdt);
-		tcdu.Timestep(simdt);
-		scdu.Timestep(simdt);
-		ems.TimeStep(simdt);
-		CrewStatus.Timestep(simdt);
+			// Better acceleration measurement stability
+			imu.Timestep(simdt);
+			tcdu.Timestep(simdt);
+			scdu.Timestep(simdt);
+			ems.TimeStep(simdt);
+			CrewStatus.Timestep(simdt);
 
-		if (stage < CSM_LEM_STAGE)
-		{
-			iu->PostStep(simt, simdt, mjd);
+			if (stage < CSM_LEM_STAGE)
+			{
+				iu->PostStep(simt, simdt, mjd);
+			}
 		}
+		// Order is important, otherwise delayed springloaded switches are reset immediately
+		MainPanel.timestep(MissionTime);
+		checkControl.timestep(MissionTime, eventControl);
 	}
-	// Order is important, otherwise delayed springloaded switches are reset immediately
-	MainPanel.timestep(MissionTime);
-	checkControl.timestep(MissionTime, eventControl);
 
 	// Update VC animations
 	if (oapiCameraInternal() && oapiCockpitMode() == COCKPIT_VIRTUAL)
@@ -3478,7 +3505,9 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 	VESSELSTATUS status;
 	GetStatus(status);
 
-	SystemsTimestep(simt, simdt, mjd);
+	if (!IsMultiplayerReplica()) {
+		SystemsTimestep(simt, simdt, mjd);
+	}
 
 	if(stage < LAUNCH_STAGE_SIVB) {
 		if (GetNavmodeState(NAVMODE_KILLROT)) {
@@ -3677,9 +3706,9 @@ int Saturn::clbkConsumeDirectKey(char *kstate)
 	// Only override these keys if the user is holding no modifier keys, Alt only, or Ctrl + Alt.
 	if (GetAttitudeMode() == ATTITUDEMODE::ATTMODE_ROT && !(KEYMOD_CONTROL(kstate) && !KEYMOD_ALT(kstate)) && !KEYMOD_SHIFT(kstate)) {
 		// Possible deflection amounts are:
-		// No key modifiers: 10.5° (max proportional rate, but not hardover)
-		// Alt: 11.5° (full deflection, triggering direct switches)
-		// Ctrl + Alt: 1.51° (triggering breakout switches)
+		// No key modifiers: 10.5Â° (max proportional rate, but not hardover)
+		// Alt: 11.5Â° (full deflection, triggering direct switches)
+		// Ctrl + Alt: 1.51Â° (triggering breakout switches)
 		double deflectionDegrees = KEYMOD_ALT(kstate) ? KEYMOD_CONTROL(kstate) ? 1.51 : 11.5 : 10.5;
 		double deflectionPercent = deflectionDegrees / 11.5;
 
@@ -5380,6 +5409,10 @@ void Saturn::CalculatePMIandCOG(VECTOR3 &PMI, VECTOR3 &COG)
 
 int Saturn::clbkGeneric (int msgid, int prm, void *context)
 {
+	if (msgid == nasspmp_api::MessageId) {
+		return NasspReplicationBridge::HandleRequest(GetReplicationHub(), prm, context);
+	}
+
 	switch (msgid) {
 	case VMSG_LUAINTERPRETER:
 		return Saturn::Lua_InitInterpreter (context);

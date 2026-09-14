@@ -43,11 +43,49 @@
 #include "saturn.h"
 #include "papi.h"
 
-CSMCautionWarningSystem::CSMCautionWarningSystem(Sound &mastersound, Sound &buttonsound, PanelSDK &p) : 
+#include <cstring>
+
+namespace
+{
+// The visible C/W state contains 60 panel lights followed by three LEB condition lights.
+const unsigned int CautionWarningLightBitCount = CWS_LIGHTS_PER_PANEL * 2 + 3;
+const unsigned int MasterAlarmBitCount = 3;
+const unsigned int CautionWarningPresentationBytes =
+	(CautionWarningLightBitCount + MasterAlarmBitCount + 7) / 8;
+
+struct CautionWarningPresentation
+{
+	std::uint64_t lights = 0;
+	std::uint8_t masterAlarm = 0;
+};
+
+ProviderResult ReadMasterAlarmInput(const ReplicationReader &reader, bool &pressed)
+{
+	const bool read = reader.ReadValue(pressed);
+	const bool payloadComplete = reader.Finish();
+	return read && payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
+}
+
+ProviderResult ReadCautionWarningPresentation(const ReplicationReader &reader,
+	CautionWarningPresentation &presentation)
+{
+	const bool lightsRead = reader.ReadValue(presentation.lights, CautionWarningLightBitCount);
+	if (!lightsRead)
+		return ProviderResult::Malformed;
+
+	const bool masterAlarmRead = reader.ReadValue(presentation.masterAlarm, MasterAlarmBitCount);
+	const bool payloadComplete = reader.Finish();
+	return masterAlarmRead && payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
+}
+}
+
+CSMCautionWarningSystem::CSMCautionWarningSystem(Sound &mastersound, Sound &buttonsound, PanelSDK &p) :
 	CautionWarningSystem(mastersound, buttonsound, p)
 
 {
 	NextUpdateTime = MINUS_INFINITY;
+	ReplicatedLightBits = 0;
+	replicatedPresentationActive = false;
 
 	NextO2FlowCheckTime = MINUS_INFINITY;
 	LastO2FlowCheckHigh = false;
@@ -665,10 +703,10 @@ void CSMCautionWarningSystem::RenderLights(SURFHANDLE surf, SURFHANDLE lightsurf
 
 {
 	if (leftpanel) {
-		RenderLightPanel(surf, lightsurf, LeftLights, TestState == CWS_TEST_LIGHTS_LEFT, 6*TexMul, 122*TexMul, 0, TexMul);
+		RenderLightPanel(surf, lightsurf, 6*TexMul, 122*TexMul, 0, TexMul);
 	}
 	else {
-		RenderLightPanel(surf, lightsurf, RightLights, TestState == CWS_TEST_LIGHTS_RIGHT, 261*TexMul, 122*TexMul, CWS_LIGHTS_PER_PANEL, TexMul);
+		RenderLightPanel(surf, lightsurf, 261*TexMul, 122*TexMul, CWS_LIGHTS_PER_PANEL, TexMul);
 	}
 }
 
@@ -738,25 +776,153 @@ bool CSMCautionWarningSystem::LightPowered(int i)
 	return true;
 }
 
-void CSMCautionWarningSystem::RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf, bool *LightState, bool LightTest, int sdx, int sdy, int base, int TexMul)
+void CSMCautionWarningSystem::RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf,
+	int sdx, int sdy, int base, int TexMul)
 
 {
-	int i = 0;
-	int row, column;
-
-	if (!LightsPowered())
-		return;
-
-	for (row = 0; row < 6; row++) {
-		for (column = 0; column < 4; column++) {
-			if (LightTest || (LightState[i] && (Mode != CWS_MODE_ACK || MasterAlarmPressed))) {
-				if (!IsFailed(i + base) && LightPowered(i + base)) {
-					oapiBlt(surf, lightsurf, column * 53*TexMul, row * 18*TexMul, column * 53*TexMul + sdx, row * 18*TexMul + sdy, 50*TexMul, 16*TexMul);
-				}
+	const std::uint64_t displayedLights = GetDisplayedLightBits();
+	for (int row = 0; row < 6; row++) {
+		for (int column = 0; column < 4; column++) {
+			const int light = row * 4 + column;
+			if (displayedLights & (UINT64_C(1) << (light + base))) {
+				oapiBlt(surf, lightsurf, column * 53*TexMul, row * 18*TexMul,
+					column * 53*TexMul + sdx, row * 18*TexMul + sdy, 50*TexMul, 16*TexMul);
 			}
-			i++;
 		}
 	}
+}
+
+const char *CSMCautionWarningSystem::ComponentKey() const
+{
+	return "csm.caution_warning";
+}
+
+ProviderResult CSMCautionWarningSystem::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	ReplicationGroupDescriptor input;
+	input.key = "master_alarm_input";
+	ReplicationSchemaBuilder inputSchema;
+	inputSchema.AddString("pressed");
+	inputSchema.AddUint32(1);
+	input.schemaId = inputSchema.SchemaId();
+	input.delivery = ReplicationDelivery::Reliable;
+	input.clientReplicates = true;
+	input.replicateChanges = true;
+	input.maximumPayloadBytes = sizeof(std::uint8_t);
+	catalog.AddGroup(input);
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = "visible_lights";
+	ReplicationSchemaBuilder presentationSchema;
+	presentationSchema.AddString("lights");
+	presentationSchema.AddUint32(CautionWarningLightBitCount);
+	presentationSchema.AddString("master_alarm");
+	presentationSchema.AddUint32(MasterAlarmBitCount);
+	presentation.schemaId = presentationSchema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 33;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = CautionWarningPresentationBytes;
+	catalog.AddGroup(presentation);
+
+	return ProviderResult::Success;
+}
+
+ProviderResult CSMCautionWarningSystem::Capture(const char *groupKey, ReplicationWriter &writer,
+	const CaptureContext &context)
+{
+	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
+		const bool pressed = IsMasterAlarmPressed();
+		const bool written = writer.WriteValue(pressed);
+		return written ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
+
+	if (std::strcmp(groupKey, "visible_lights") == 0) {
+		const std::uint64_t lights = GetDisplayedLightBits();
+		const std::uint8_t masterAlarm = static_cast<std::uint8_t>(GetDisplayedMasterAlarmBits());
+		const bool lightsWritten = writer.WriteValue(lights, CautionWarningLightBitCount);
+		if (!lightsWritten)
+			return ProviderResult::BufferTooSmall;
+		const bool masterAlarmWritten = writer.WriteValue(masterAlarm, MasterAlarmBitCount);
+		return masterAlarmWritten ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
+
+	return ProviderResult::Unsupported;
+}
+
+ProviderResult CSMCautionWarningSystem::Validate(const char *groupKey, const ReplicationReader &reader,
+	const ApplyContext &context) const
+{
+	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
+		bool pressed = false;
+		return ReadMasterAlarmInput(reader, pressed);
+	}
+
+	if (std::strcmp(groupKey, "visible_lights") != 0 || context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+
+	CautionWarningPresentation presentation;
+	return ReadCautionWarningPresentation(reader, presentation);
+}
+
+void CSMCautionWarningSystem::Apply(const char *groupKey, const ReplicationReader &reader,
+	const ApplyContext &context)
+{
+	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
+		bool pressed = false;
+		ReadMasterAlarmInput(reader, pressed);
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			ApplyRemoteMasterAlarmPressed(pressed != 0);
+		else if (context.purpose == ApplyPurpose::AuthoritativeUpdate)
+			ApplyReplicatedMasterAlarmPressed(pressed != 0);
+		else
+			SetReplicatedMasterAlarmPressed(pressed != 0);
+		return;
+	}
+
+	CautionWarningPresentation presentation;
+	ReadCautionWarningPresentation(reader, presentation);
+	SetReplicatedLightBits(presentation.lights);
+	SetReplicatedMasterAlarmBits(presentation.masterAlarm);
+}
+
+void CSMCautionWarningSystem::OnRoleChanged(ReplicationRole role)
+{
+	replicatedPresentationActive = role == ReplicationRole::Replica;
+	if (!replicatedPresentationActive) {
+		ClearReplicatedLightBits();
+		ClearReplicatedMasterAlarmBits();
+	}
+}
+
+std::uint64_t CSMCautionWarningSystem::GetDisplayedLightBits()
+{
+	if (replicatedPresentationActive)
+		return ReplicatedLightBits;
+
+	std::uint64_t bits = 0;
+	if (LightsPowered()) {
+		for (int light = 0; light < CWS_LIGHTS_PER_PANEL * 2; ++light) {
+			const bool left = light < CWS_LIGHTS_PER_PANEL;
+			const bool tested = TestState == (left ? CWS_TEST_LIGHTS_LEFT : CWS_TEST_LIGHTS_RIGHT);
+			const bool state = left ? LeftLights[light] : RightLights[light - CWS_LIGHTS_PER_PANEL];
+			if ((tested || (state && (Mode != CWS_MODE_ACK || MasterAlarmPressed))) &&
+				!IsFailed(light) && LightPowered(light)) {
+				bits |= UINT64_C(1) << light;
+			}
+		}
+	}
+
+	// The three high bits carry the LEB condition lamps rendered from the same C/W state.
+	if (IsPowered() && GNLampState != 0) {
+		if (GNLampState == 2 || GNPGNSAlarm)
+			bits |= UINT64_C(1) << 60;
+		if (GNLampState == 2 || RightLights[CSM_CWS_CMC_LIGHT - CWS_LIGHTS_PER_PANEL])
+			bits |= UINT64_C(1) << 61;
+		if (GNLampState == 2 || RightLights[CSM_CWS_ISS_LIGHT - CWS_LIGHTS_PER_PANEL])
+			bits |= UINT64_C(1) << 62;
+	}
+	return bits;
 }
 
 void CSMCautionWarningSystem::SaveState(FILEHANDLE scn)

@@ -235,6 +235,7 @@ public:
 	/// \param position Which Master Alarm light we're rendering.
 	///
 	void RenderMasterAlarm(SURFHANDLE surf, SURFHANDLE alarmLit, SURFHANDLE border, CWSMasterAlarmPosition position, int xTexMul = 1);
+	int GetDisplayedMasterAlarmBits();
 
 	///
 	/// \brief Render the lights.
@@ -288,8 +289,17 @@ public:
 	/// \brief Checklist helper function 
 	///
 	void PushMasterAlarm();
+	bool IsMasterAlarmPressed() const { return MasterAlarmPressed; }
 
 protected:
+	// These paths apply remote operation, silent baseline state or a visible replica update.
+	void SetReplicatedMasterAlarmBits(int bits) { ReplicatedMasterAlarmBits = bits; }
+	void ClearReplicatedMasterAlarmBits() { ReplicatedMasterAlarmBits = 0; }
+	// Selects the authority presentation for C&W implementations operating as replicas.
+	virtual bool UsesReplicatedMasterAlarmState() const { return false; }
+	void ApplyRemoteMasterAlarmPressed(bool pressed);
+	void SetReplicatedMasterAlarmPressed(bool pressed) { MasterAlarmPressed = pressed; }
+	void ApplyReplicatedMasterAlarmPressed(bool pressed);
 
 	///
 	/// \brief What's the current light test state?
@@ -340,6 +350,8 @@ protected:
 	/// \brief Is the user pressing the Master Alarm light?
 	///
 	bool MasterAlarmPressed;
+
+	int ReplicatedMasterAlarmBits; // Visible left, right and LEB lamps occupy bits 0 through 2.
 
 	///
 	/// \brief Should we inhibit the next master alarm?

@@ -2110,34 +2110,35 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 			if (dsky.TrackerLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_TRACKER); }
 		}
 
-		for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++)
-		{
-			if ((LightStates[i]  && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT)
-			{
-				if (cws.GetSource() != CWS_SOURCE_CM) {
+		if (IsMultiplayerReplica()) {
+			// The authority supplies final lamp visibility, so frozen local C/W state does not filter it again.
+			SetVCLighting(vcidx, IntegralLights_CW_Lights, MAT_LIGHT, 0,
+				NUM_ELEMENTS(IntegralLights_CW_Lights));
+			const std::uint64_t lightBits = cws.GetDisplayedLightBits();
+			for (int i = 0; i < CWS_LIGHTS_PER_PANEL * 2; i++) {
+				if (lightBits & (UINT64_C(1) << i))
 					CW_Lights.push_back(IntegralLights_CW_Lights[i]);
-				}
-				else
-				{
-					CW_Lights.push_back(IntegralLights_CW_Lights_CM[i]);
+			}
+		}
+		else {
+			for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++) {
+				if ((LightStates[i] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT) {
+					if (cws.GetSource() != CWS_SOURCE_CM)
+						CW_Lights.push_back(IntegralLights_CW_Lights[i]);
+					else
+						CW_Lights.push_back(IntegralLights_CW_Lights_CM[i]);
 				}
 			}
-		 }
 
-		for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++)
-		{
-			if ((LightStates[i+30]  && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT)
-			{
-				if (cws.GetSource() != CWS_SOURCE_CM) {
-					CW_Lights.push_back(IntegralLights_CW_Lights[i + 30]);
-				}
-				else
-				{
-					CW_Lights.push_back(IntegralLights_CW_Lights_CM[i+30]);
+			for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++) {
+				if ((LightStates[i + 30] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT) {
+					if (cws.GetSource() != CWS_SOURCE_CM)
+						CW_Lights.push_back(IntegralLights_CW_Lights[i + 30]);
+					else
+						CW_Lights.push_back(IntegralLights_CW_Lights_CM[i + 30]);
 				}
 			}
-		 }
-
+		}
 		if (CW_Lights.size() > 0) SetVCLighting(vcidx, &CW_Lights[0], MAT_LIGHT, 1, CW_Lights.size()); 	//Caution & Warning Lights
 		if (DSKY_Lights.size() > 0) SetVCLighting(vcidx, &DSKY_Lights[0], MAT_LIGHT, LeftNumericLights.Variable_115_5VAC_Output.Voltage(), DSKY_Lights.size());
 		if (DSKY_LEB_Lights.size() > 0) SetVCLighting(vcidx, &DSKY_LEB_Lights[0], MAT_LIGHT, LEBNumericLights.Variable_115_5VAC_Output.Voltage(), DSKY_LEB_Lights.size());
@@ -2161,7 +2162,20 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 		}
 */
 		// LEB Conditional Lamps
-		if (cws.IsPowered() && cws.GetGNLampState() != 0) {
+		if (IsMultiplayerReplica()) {
+			// High presentation bits carry the authority-computed LEB condition lamps.
+			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 0.0, 1);
+			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, 0.0, 1);
+			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 0.0, 1);
+			const std::uint64_t lightBits = cws.GetDisplayedLightBits();
+			if (lightBits & (UINT64_C(1) << 60))
+				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 1.0, 1);
+			if (lightBits & (UINT64_C(1) << 61))
+				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, 1.0, 1);
+			if (lightBits & (UINT64_C(1) << 62))
+				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 1.0, 1);
+		}
+		else if (cws.IsPowered() && cws.GetGNLampState() != 0) {
 			if (cws.GetGNLampState() == 2 || cws.GetGNPGNSAlarm()) {
 				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 1.0, 1);
 			}
@@ -2174,7 +2188,6 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 1.0, 1);
 			}
 		}
-
 		/////////////////////
 		// Full Lit Lights //
 		/////////////////////
@@ -2189,11 +2202,24 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 			}
 		}
 
-		if (cws.IsPowered()) {
+		if (IsMultiplayerReplica()) {
+			// Replica master-alarm materials are driven only by the authority's visible-state bits.
+			SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 0.0, 1);
+			SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 0.0, 1);
+			SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 0.0, 1);
+			const int masterAlarmBits = cws.GetDisplayedMasterAlarmBits();
+			if (masterAlarmBits & 1)
+				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
+			if (masterAlarmBits & 2)
+				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
+			if (masterAlarmBits & 4)
+				SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 1.0, 1);
+		}
+		else if (cws.IsPowered()) {
 			if ((cws.GetMasterAlarm() || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT) && cws.GetMode() != CWS_MODE_BOOST) {
 				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
 			}
-		
+
 			if (cws.GetMasterAlarm() || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT) {
 				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
 			}

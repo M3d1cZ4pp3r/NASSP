@@ -63,6 +63,7 @@ PanelSwitchItem::PanelSwitchItem() : fInitialAnimState(0.0)
 	doTimeStep = false;
 
 	callback = 0;
+	replicationRevision = 0;
 
 	bHasAnimations = false;
 	bHasDirection = false;
@@ -112,7 +113,144 @@ int PanelSwitchItem::GetState()
 void PanelSwitchItem::SetState(int value)
 
 {
+	if (state == value)
+		return;
 	state = value;
+	NotifyReplicationValueChanged();
+}
+
+void PanelSwitchItem::ApplyRemoteInput(int value)
+
+{
+	SetState(value);
+}
+
+void PanelSwitchItem::ApplyReplicatedState(int value)
+
+{
+	PanelSwitchItem::SetState(value);
+}
+
+PanelReplicationValueType PanelSwitchItem::GetReplicationValueType() const
+{
+	return PanelReplicationValueType::DiscreteInput;
+}
+
+bool PanelSwitchItem::CaptureReplicationValue(PanelReplicationValue &valueBits)
+{
+	valueBits = static_cast<PanelReplicationValue>(GetState());
+	return true;
+}
+
+bool PanelSwitchItem::WriteReplicationValue(ReplicationWriter &writer)
+{
+	PanelReplicationValue value = 0;
+	const bool captured = CaptureReplicationValue(value);
+	if (!captured)
+		return false;
+
+	const PanelReplicationValueType type = GetReplicationValueType();
+	if (type == PanelReplicationValueType::DiscreteInput ||
+		type == PanelReplicationValueType::IndicatorPresentation) {
+		const std::uint32_t stateValue = static_cast<std::uint32_t>(value & PanelReplicationStateMask);
+		if (!writer.WriteValue(stateValue, ReplicationStateBitCount()))
+			return false;
+		if (ReplicatesHeldState()) {
+			if (!writer.WriteValue((value & PanelReplicationHeld) != 0))
+				return false;
+		}
+		if (ReplicatesGuardState()) {
+			if (!writer.WriteValue((value & PanelReplicationGuard) != 0))
+				return false;
+		}
+		return true;
+	}
+	return writer.WriteValue(value);
+}
+
+bool PanelSwitchItem::ReadReplicationValue(const ReplicationReader &reader,
+	PanelReplicationValue &value) const
+{
+	const PanelReplicationValueType type = GetReplicationValueType();
+	if (type == PanelReplicationValueType::DiscreteInput ||
+		type == PanelReplicationValueType::IndicatorPresentation) {
+		std::uint32_t stateValue = 0;
+		if (!reader.ReadValue(stateValue, ReplicationStateBitCount()))
+			return false;
+
+		value = stateValue;
+		bool flag = false;
+		if (ReplicatesHeldState()) {
+			if (!reader.ReadValue(flag))
+				return false;
+			if (flag)
+				value |= PanelReplicationHeld;
+		}
+		if (ReplicatesGuardState()) {
+			if (!reader.ReadValue(flag))
+				return false;
+			if (flag)
+				value |= PanelReplicationGuard;
+		}
+		return true;
+	}
+	return reader.ReadValue(value);
+}
+
+unsigned int PanelSwitchItem::ReplicationStateBitCount() const
+{
+	return 32;
+}
+
+bool PanelSwitchItem::ReplicatesHeldState() const
+{
+	return false;
+}
+
+bool PanelSwitchItem::ReplicatesGuardState() const
+{
+	return false;
+}
+
+unsigned int PanelSwitchItem::MaximumReplicationBits() const
+{
+	const PanelReplicationValueType type = GetReplicationValueType();
+	if (type == PanelReplicationValueType::DiscreteInput ||
+		type == PanelReplicationValueType::IndicatorPresentation)
+		return ReplicationStateBitCount() + (ReplicatesHeldState() ? 1 : 0) +
+			(ReplicatesGuardState() ? 1 : 0);
+	if (type == PanelReplicationValueType::Excluded)
+		return 0;
+	return sizeof(PanelReplicationValue) * 8;
+}
+
+std::uint32_t PanelSwitchItem::MaximumReplicationState() const
+{
+	return UINT32_MAX;
+}
+
+bool PanelSwitchItem::ValidateReplicationValue(std::uint64_t valueBits) const
+{
+	PanelReplicationValue allowedBits = PanelReplicationStateMask;
+	if (ReplicatesHeldState())
+		allowedBits |= PanelReplicationHeld;
+	if (ReplicatesGuardState())
+		allowedBits |= PanelReplicationGuard;
+	return (valueBits & ~allowedBits) == 0 &&
+		(valueBits & PanelReplicationStateMask) <= MaximumReplicationState();
+}
+
+void PanelSwitchItem::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
+{
+	const int value = static_cast<int>(valueBits & PanelReplicationStateMask);
+	if (purpose == ApplyPurpose::Baseline)
+		ApplyReplicatedState(value);
+	else
+		ApplyRemoteInput(value);
+}
+
+void PanelSwitchItem::ClearReplicationPresentation()
+{
 }
 
 void PanelSwitchItem::DefineVCAnimations(UINT vc_idx)
@@ -260,6 +398,7 @@ bool TwoPositionSwitch::SwitchTo(int newState, bool dontspring) {
 		if (state != newState)
 		{
 			state = newState;
+			NotifyReplicationValueChanged();
 			SwitchToggled = true;
 			if (switchRow)
 			{
@@ -350,8 +489,10 @@ bool TwoPositionSwitch::DoCheckMouseClick(int event, int mx, int my) {
 		}
 	}
 	else if (IsSpringLoaded() && ((event & PANEL_MOUSE_LBUP) != 0) && !IsHeld()) {
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(TOGGLESWITCH_DOWN);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(TOGGLESWITCH_UP);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+			SwitchTo(TOGGLESWITCH_DOWN);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)
+			SwitchTo(TOGGLESWITCH_UP);
 	}
 	return true;
 }
@@ -482,6 +623,124 @@ void TwoPositionSwitch::SetState(int value)
 	}
 }
 
+void TwoPositionSwitch::ApplyRemoteInput(int value)
+{
+	// A remote momentary input remains deflected until its matching release arrives.
+	const bool springReturn = IsSpringReturn(value);
+	const bool stateChanged = SwitchTo(value, true);
+	if (stateChanged && !springReturn)
+		Sclick.play();
+}
+
+void TwoPositionSwitch::ApplyReplicatedState(int value)
+{
+	PanelSwitchItem::ApplyReplicatedState(value);
+}
+
+bool TwoPositionSwitch::IsSpringReturn(int newState) const
+{
+	if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+		return newState == TOGGLESWITCH_DOWN;
+	if (springLoaded == SPRINGLOADEDSWITCH_UP)
+		return newState == TOGGLESWITCH_UP;
+	return false;
+}
+
+bool ThreePosSwitch::IsSpringReturn(int newState) const
+{
+	if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+		return newState == THREEPOSSWITCH_DOWN;
+	if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
+		return newState == THREEPOSSWITCH_CENTER;
+	if (springLoaded == SPRINGLOADEDSWITCH_UP)
+		return newState == THREEPOSSWITCH_UP;
+	if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP)
+		return state == THREEPOSSWITCH_UP && newState == THREEPOSSWITCH_CENTER;
+	if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGDOWN)
+		return state == THREEPOSSWITCH_DOWN && newState == THREEPOSSWITCH_CENTER;
+	return false;
+}
+
+bool FivePosSwitch::IsSpringReturn(int newState) const
+{
+	if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+		return newState == FIVEPOSSWITCH_DOWN;
+	if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
+		return newState == FIVEPOSSWITCH_CENTER;
+	if (springLoaded == SPRINGLOADEDSWITCH_UP)
+		return newState == FIVEPOSSWITCH_UP;
+	if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP)
+		return state == FIVEPOSSWITCH_UP && newState == FIVEPOSSWITCH_CENTER;
+	if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGDOWN)
+		return state == FIVEPOSSWITCH_DOWN && newState == FIVEPOSSWITCH_CENTER;
+	return false;
+}
+
+bool TwoPositionSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+{
+	PanelSwitchItem::CaptureReplicationValue(valueBits);
+	if (IsHeld())
+		valueBits |= PanelReplicationHeld;
+	return true;
+}
+
+void TwoPositionSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
+{
+	SetHeld((valueBits & PanelReplicationHeld) != 0);
+	PanelSwitchItem::ApplyReplicationValue(valueBits & PanelReplicationStateMask, purpose);
+}
+
+bool GuardedToggleSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+{
+	TwoPositionSwitch::CaptureReplicationValue(valueBits);
+	if (GetGuardState())
+		valueBits |= PanelReplicationGuard;
+	return true;
+}
+
+void GuardedToggleSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
+{
+	const bool guardChanged = GetGuardState() != ((valueBits & PanelReplicationGuard) != 0);
+	SetGuardState((valueBits & PanelReplicationGuard) != 0);
+	TwoPositionSwitch::ApplyReplicationValue(valueBits, purpose);
+	if (purpose != ApplyPurpose::Baseline && guardChanged)
+		guardClick.play();
+}
+
+bool GuardedPushSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+{
+	TwoPositionSwitch::CaptureReplicationValue(valueBits);
+	if (GetGuardState())
+		valueBits |= PanelReplicationGuard;
+	return true;
+}
+
+void GuardedPushSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
+{
+	const bool guardChanged = GetGuardState() != ((valueBits & PanelReplicationGuard) != 0);
+	SetGuardState((valueBits & PanelReplicationGuard) != 0);
+	TwoPositionSwitch::ApplyReplicationValue(valueBits, purpose);
+	if (purpose != ApplyPurpose::Baseline && guardChanged)
+		guardClick.play();
+}
+
+bool GuardedThreePosSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+{
+	TwoPositionSwitch::CaptureReplicationValue(valueBits);
+	if (GetGuardState())
+		valueBits |= PanelReplicationGuard;
+	return true;
+}
+
+void GuardedThreePosSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
+{
+	const bool guardChanged = GetGuardState() != ((valueBits & PanelReplicationGuard) != 0);
+	SetGuardState((valueBits & PanelReplicationGuard) != 0);
+	TwoPositionSwitch::ApplyReplicationValue(valueBits, purpose);
+	if (purpose != ApplyPurpose::Baseline && guardChanged)
+		guardClick.play();
+}
+
 void TwoPositionSwitch::timestep(double missionTime)
 {
 	if (missionTime <= resetTime)
@@ -581,12 +840,15 @@ bool ThreePosSwitch::CheckMouseClick(int event, int mx, int my) {
 
 	}
 	else if (IsSpringLoaded() && ((event & PANEL_MOUSE_LBUP) != 0) && !IsHeld()) {		
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(THREEPOSSWITCH_DOWN,true);
-		if (springLoaded == SPRINGLOADEDSWITCH_CENTER) SwitchTo(THREEPOSSWITCH_CENTER,true);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(THREEPOSSWITCH_UP,true);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+			SwitchTo(THREEPOSSWITCH_DOWN, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
+			SwitchTo(THREEPOSSWITCH_CENTER, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)
+			SwitchTo(THREEPOSSWITCH_UP, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP && state == THREEPOSSWITCH_UP)     
-			SwitchTo(THREEPOSSWITCH_CENTER,true);
+			SwitchTo(THREEPOSSWITCH_CENTER, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGDOWN && state == THREEPOSSWITCH_DOWN)     
 			SwitchTo(THREEPOSSWITCH_CENTER);
@@ -635,6 +897,7 @@ bool ThreePosSwitch::SwitchTo(int newState, bool dontspring)
 		if (state != newState)
 		{
 			state = newState;
+			NotifyReplicationValueChanged();
 			SwitchToggled = true;
 			if (switchRow) {
 				if (switchRow->panelSwitches->listener) 
@@ -741,12 +1004,15 @@ bool FivePosSwitch::CheckMouseClick(int event, int mx, int my) {
 			Sclick.play();
 		}
 	} else if (IsSpringLoaded() && event == PANEL_MOUSE_LBUP && !IsHeld()) {		
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(FIVEPOSSWITCH_DOWN,true);
-		if (springLoaded == SPRINGLOADEDSWITCH_CENTER) SwitchTo(FIVEPOSSWITCH_CENTER,true);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(FIVEPOSSWITCH_UP,true);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+			SwitchTo(FIVEPOSSWITCH_DOWN, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
+			SwitchTo(FIVEPOSSWITCH_CENTER, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)
+			SwitchTo(FIVEPOSSWITCH_UP, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP && state == FIVEPOSSWITCH_UP)     
-			SwitchTo(FIVEPOSSWITCH_CENTER,true);
+			SwitchTo(FIVEPOSSWITCH_CENTER, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGDOWN && state == FIVEPOSSWITCH_DOWN)     
 			SwitchTo(FIVEPOSSWITCH_CENTER);
@@ -810,9 +1076,12 @@ bool FivePosSwitch::CheckMouseClickVC(int event, VECTOR3 &p) {
 		}
 	}
 	else if (IsSpringLoaded() && event == PANEL_MOUSE_LBUP && !IsHeld()) {
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(FIVEPOSSWITCH_DOWN, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_CENTER) SwitchTo(FIVEPOSSWITCH_CENTER, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(FIVEPOSSWITCH_UP, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
+			SwitchTo(FIVEPOSSWITCH_DOWN, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
+			SwitchTo(FIVEPOSSWITCH_CENTER, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)
+			SwitchTo(FIVEPOSSWITCH_UP, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP && state == FIVEPOSSWITCH_UP)
 			SwitchTo(FIVEPOSSWITCH_CENTER, true);
@@ -902,6 +1171,7 @@ bool FivePosSwitch::SwitchTo(int newState, bool dontspring)
 		if (state != newState)
 		{
 			state = newState;
+			NotifyReplicationValueChanged();
 			SwitchToggled = true;
 			if (switchRow) {
 				if (switchRow->panelSwitches->listener) 
@@ -1147,6 +1417,7 @@ void CircuitBrakerSwitch::DrawPower(double watts)
 			double amps = watts / volts;
 			if (amps > MaxAmps) {				
 				state = 0;
+				NotifyReplicationValueChanged();
 				SwitchToggled = true;
 
 				if (switchRow) {
@@ -1220,12 +1491,15 @@ void AttitudeToggle::DrawSwitch(SURFHANDLE DrawSurface)
 		return;
 	
 	if (Active) {
+		const int oldState = state;
 		if (OurVessel->GetAttitudeMode() == ATTMODE_ROT) {
 			state = true;
 		}
 		else {
 			state = false;
 		}
+		if (state != oldState)
+			NotifyReplicationValueChanged();
 	}
 
 	DoDrawSwitch(DrawSurface);
@@ -1247,12 +1521,15 @@ void HUDToggle::DrawSwitch(SURFHANDLE DrawSurface)
 
 {
 	if (Active) {
+		const int oldState = state;
 		if (oapiGetHUDMode() == HUDMode) {
 			state = true;
 		}
 		else {
 			state = false;
 		}
+		if (state != oldState)
+			NotifyReplicationValueChanged();
 	}
 
 	DoDrawSwitch(DrawSurface);
@@ -1311,12 +1588,15 @@ void NavModeToggle::DrawSwitch(SURFHANDLE DrawSurface)
 
 {
 	if (Active) {
+		const int oldState = state;
 		if (OurVessel->GetNavmodeState(NAVMode)) {
 			state = true;
 		}
 		else {
 			state = false;
 		}
+		if (state != oldState)
+			NotifyReplicationValueChanged();
 	}
 
 	DoDrawSwitch(DrawSurface);
@@ -1384,7 +1664,9 @@ bool SwitchRow::CheckMouseClick(int id, int event, int mx, int my) {
 	PanelSwitchItem *s = SwitchList;
 	while (s) {
 		if (s->CheckMouseClick(event, mx, my))
+		{
 			return true;
+		}
 		s = s->GetNext();
 	}
 	return false;
@@ -2443,10 +2725,100 @@ void ContinuousSwitch::SetWraparound(bool _Wraparound)
 	Wraparound = _Wraparound;
 }
 
-double ContinuousSwitch::GetValue()
+double ContinuousSwitch::GetValue() const
 {
 	//Returns value of displayed state
 	return AngletoDisplay(state);
+}
+
+bool ContinuousSwitch::SetReplicatedValue(double value)
+{
+	if (value != value || value < minValue || value > maxValue)
+		return false;
+
+	SetValue(DisplayToAngle(value));
+	return true;
+}
+
+PanelReplicationValueType ContinuousSwitch::GetReplicationValueType() const
+{
+	return PanelReplicationValueType::ContinuousInput;
+}
+
+bool ContinuousSwitch::CaptureReplicationValue(std::uint64_t &valueBits)
+{
+	const double value = GetValue();
+	std::memcpy(&valueBits, &value, sizeof(value));
+	return true;
+}
+
+bool ContinuousSwitch::ValidateReplicationValue(std::uint64_t valueBits) const
+{
+	double value = 0;
+	std::memcpy(&value, &valueBits, sizeof(value));
+	return value == value && value >= minValue && value <= maxValue;
+}
+
+void ContinuousSwitch::ApplyReplicationValue(std::uint64_t valueBits, ApplyPurpose purpose)
+{
+	double value = 0;
+	std::memcpy(&value, &valueBits, sizeof(value));
+	if (purpose == ApplyPurpose::Baseline)
+		SetReplicatedValue(value);
+	else
+		SwitchTo(DisplayToAngle(value));
+}
+
+PanelReplicationValueType IndicatorSwitch::GetReplicationValueType() const
+{
+	return PanelReplicationValueType::IndicatorPresentation;
+}
+
+bool IndicatorSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+{
+	valueBits = static_cast<PanelReplicationValue>(GetDisplayState());
+	return true;
+}
+
+void IndicatorSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose)
+{
+	SetReplicatedDisplayState(static_cast<int>(valueBits & PanelReplicationStateMask));
+}
+
+void IndicatorSwitch::ClearReplicationPresentation()
+{
+	ClearReplicatedDisplayState();
+}
+
+PanelReplicationValueType MeterSwitch::GetReplicationValueType() const
+{
+	return PanelReplicationValueType::MeterPresentation;
+}
+
+bool MeterSwitch::CaptureReplicationValue(std::uint64_t &valueBits)
+{
+	const double value = GetCurrentDisplayValue();
+	std::memcpy(&valueBits, &value, sizeof(value));
+	return true;
+}
+
+bool MeterSwitch::ValidateReplicationValue(std::uint64_t valueBits) const
+{
+	double value = 0;
+	std::memcpy(&value, &valueBits, sizeof(value));
+	return value == value;
+}
+
+void MeterSwitch::ApplyReplicationValue(std::uint64_t valueBits, ApplyPurpose)
+{
+	double value = 0;
+	std::memcpy(&value, &valueBits, sizeof(value));
+	SetReplicatedDisplayValue(value);
+}
+
+void MeterSwitch::ClearReplicationPresentation()
+{
+	ClearReplicatedDisplayValue();
 }
 
 double ContinuousSwitch::GetOutput()
@@ -2495,6 +2867,7 @@ bool ContinuousSwitch::SwitchTo(double newPosition)
 
 void ContinuousSwitch::SetValue(double newAngle)
 {
+	const double oldState = state;
 	//Limit
 	if (Wraparound)
 	{
@@ -2520,6 +2893,8 @@ void ContinuousSwitch::SetValue(double newAngle)
 	}
 
 	state = newAngle;
+	if (state != oldState)
+		NotifyReplicationValueChanged();
 }
 
 double ContinuousSwitch::DisplayToAngle(double value) const
@@ -3042,6 +3417,20 @@ void RotationalSwitch::AddPosition(int value, double angle) {
 	}
 }
 
+unsigned int RotationalSwitch::ReplicationStateBitCount() const
+{
+	unsigned int bitCount = 1;
+	const std::uint32_t maximumState = MaximumReplicationState();
+	while (bitCount < 32 && maximumState >= (std::uint32_t(1) << bitCount))
+		bitCount++;
+	return bitCount;
+}
+
+std::uint32_t RotationalSwitch::MaximumReplicationState() const
+{
+	return maxState < 0 ? 0 : static_cast<std::uint32_t>(maxState);
+}
+
 void RotationalSwitch::DeletePositions() {
 
 	RotationalSwitchPosition *p1, *p = positionList; 
@@ -3128,7 +3517,7 @@ bool RotationalSwitch::SwitchTo(int newValue) {
 }
 
 void RotationalSwitch::SetValue(int newValue) { 
-	
+	RotationalSwitchPosition *oldPosition = position;
 	RotationalSwitchPosition *p = positionList; 
 	while (p) {
 		if (p->GetValue() == newValue) {
@@ -3136,6 +3525,8 @@ void RotationalSwitch::SetValue(int newValue) {
 		}
 		p = p->GetNext();
 	}
+	if (position != oldPosition)
+		NotifyReplicationValueChanged();
 }
 
 double RotationalSwitch::AngleDiff(double a1, double a2) {
@@ -3184,6 +3575,11 @@ void RotationalSwitch::LoadState(char *line) {
 void RotationalSwitch::SetState(int value)
 {
 	SwitchTo(value);
+}
+
+void RotationalSwitch::ApplyReplicatedState(int value)
+{
+	SetValue(value);
 }
 
 void RotationalSwitch::DefineMeshGroup(UINT _grpIndex)
@@ -3602,6 +3998,7 @@ bool ThumbwheelSwitch::SwitchTo(int newState) {
 
 	if (newState >= 0 && newState <= maxState && state != newState) {
 		state = newState;
+		NotifyReplicationValueChanged();
 		sclick.play();
 		if (callback)
 			callback->call(this);
@@ -3650,6 +4047,14 @@ void ThumbwheelSwitch::LoadState(char *line) {
 void ThumbwheelSwitch::SetState(int value)
 {
 	SwitchTo(value);
+}
+
+void ThumbwheelSwitch::ApplyReplicatedState(int value)
+{
+	if (value >= 0 && value <= maxState && state != value) {
+		state = value;
+		NotifyReplicationValueChanged();
+	}
 }
 
 //
@@ -3721,6 +4126,7 @@ IndicatorSwitch::IndicatorSwitch() {
 	switchSurface = 0;
 	switchRow = 0;
 	SRC = NULL;
+	replicatedDisplayState = -1;
 
 }
 
@@ -3758,6 +4164,11 @@ bool IndicatorSwitch::CheckMouseClick(int event, int mx, int my) {
 }
 
 void IndicatorSwitch::DrawSwitch(SURFHANDLE drawSurface) {
+	if (replicatedDisplayState >= 0) {
+		displayState = replicatedDisplayState;
+		oapiBlt(drawSurface, switchSurface, x, y, width * replicatedDisplayState, 0, width, height);
+		return;
+	}
 
 	int drawState=0;
 	if (switchRow) {
@@ -3801,6 +4212,12 @@ void IndicatorSwitch::InitVC(SURFHANDLE surf)
 }
 
 void IndicatorSwitch::DrawSwitchVC(int id, int event, SURFHANDLE drawSurface) {
+	if (replicatedDisplayState >= 0) {
+		displayState = replicatedDisplayState;
+		oapiBlt(drawSurface, switchsurfacevc, x*TexMul, y*TexMul,
+			width * replicatedDisplayState*TexMul, 0, width*TexMul, height*TexMul);
+		return;
+	}
 
 	int drawState = 0;
 	if (switchRow) {
@@ -3878,6 +4295,8 @@ MeterSwitch::MeterSwitch() {
 	maxValue = 0;
 	switchRow = 0;
 	lastDrawTime = -1;
+	replicatedDisplayValue = 0;
+	hasReplicatedDisplayValue = false;
 
 	grpIndex = 0;
 	anim_switch = 0;
@@ -3927,6 +4346,8 @@ void MeterSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 }
 
 double MeterSwitch::GetDisplayValue() {
+	if (hasReplicatedDisplayValue)
+		return replicatedDisplayValue;
 
 	// Prevent problems if the simulation is started paused and 
 	// a lot of values are zero in that case

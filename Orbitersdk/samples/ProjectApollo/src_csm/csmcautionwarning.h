@@ -26,6 +26,10 @@
 #if !defined(_PA_CSMCAUTIONWARNING_H)
 #define _PA_CSMCAUTIONWARNING_H
 
+#include <cstdint>
+
+#include "replication/IReplicationProvider.h"
+
 // moved from Saturn.h as "foreward reference" because of FuelCellBad
 
 ///
@@ -69,7 +73,7 @@ class PanelSwitchItem;
 /// \brief The CSM-specific Caution and Warning System.
 /// \ingroup InternalSystems
 ///
-class CSMCautionWarningSystem : public CautionWarningSystem {
+class CSMCautionWarningSystem : public CautionWarningSystem, public IReplicationProvider {
 
 public:
 	///
@@ -79,6 +83,53 @@ public:
 	/// \param p Panel SDK describing spacecraft systems.
 	///
 	CSMCautionWarningSystem(Sound &mastersound, Sound &buttonsound, PanelSDK &p);
+
+	///
+	/// \brief Get the component key used for C&W replication.
+	/// \return Stable component key within the owning vessel.
+	///
+	const char *ComponentKey() const override;
+
+	///
+	/// \brief Add the C&W data groups to the replication catalog.
+	/// \param catalog Catalog to receive the data group descriptions.
+	/// \return Success if all data groups were added.
+	///
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+
+	///
+	/// \brief Write the current state of one C&W data group.
+	/// \param groupKey Key of the data group to write.
+	/// \param writer Payload writer to receive the current state.
+	/// \param context Information about the capture request.
+	/// \return Success if the requested state was written.
+	///
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer,
+		const CaptureContext &context) override;
+
+	///
+	/// \brief Check whether received C&W data can be applied.
+	/// \param groupKey Key of the received data group.
+	/// \param reader Payload reader containing the received state.
+	/// \param context Information about the apply request.
+	/// \return Success if the received state can be applied.
+	///
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader,
+		const ApplyContext &context) const override;
+
+	///
+	/// \brief Apply validated C&W data.
+	/// \param groupKey Key of the received data group.
+	/// \param reader Payload reader containing the received state.
+	/// \param context Information about the apply request.
+	///
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+
+	///
+	/// \brief Update C&W behavior for the vessel's replication role.
+	/// \param role New replication role of the owning vessel.
+	///
+	void OnRoleChanged(ReplicationRole role) override;
 
 	///
 	/// \brief Timestep processing.
@@ -91,6 +142,7 @@ public:
 	/// \param surf Surface to render to.
 	/// \param lightsurf Surface for the light bitmaps.
 	/// \param leftpanel Is this the left or right panel?
+	/// \param xTexMul Horizontal texture scale.
 	///
 	void RenderLights(SURFHANDLE surf, SURFHANDLE lightsurf, bool leftpanel, int xTexMul = 1);
 
@@ -108,7 +160,25 @@ public:
 
 	int GetSource();
 
+	///
+	/// \brief Get the C&W lamps currently shown in the cockpit.
+	/// \return Bits representing all currently visible C&W lamps.
+	///
+	std::uint64_t GetDisplayedLightBits();
+
+	///
+	/// \brief Set the C&W lamps shown by a replica.
+	/// \param bits Bits representing all C&W lamps to show.
+	///
+	void SetReplicatedLightBits(std::uint64_t bits) { ReplicatedLightBits = bits; }
+
+	///
+	/// \brief Clear the C&W lamps received from the authority.
+	///
+	void ClearReplicatedLightBits() { ReplicatedLightBits = 0; }
+
 protected:
+	bool UsesReplicatedMasterAlarmState() const override { return replicatedPresentationActive; }
 
 	//
 	// Don't need to be saved.
@@ -149,6 +219,11 @@ protected:
 	int GNLampState;
 	bool GNPGNSAlarm;
 
+	/// True while replicated C&W values are shown instead of locally calculated values.
+	bool replicatedPresentationActive;
+	/// C&W lamps received from the authority for display on this replica.
+	std::uint64_t ReplicatedLightBits;
+
 	//
 	// Helper functions.
 	//
@@ -161,13 +236,12 @@ protected:
 	///
 	/// \param surf Surface to render to.
 	/// \param lightsurf Light panel image surface.
-	/// \param LightState Pointer to an array of light states for the panel to render.
-	/// \param LightTest Is this a light test?
 	/// \param sdx X offset for light bitmaps in the panel image surface.
 	/// \param sdy Y offset for light bitmaps in the panel image surface.
 	/// \param base Light number base for this panel.
 	///
-	void RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf, bool *LightState, bool LightTest, int sdx, int sdy, int base, int xTexMul = 1);
+	void RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf, int sdx, int sdy, int base,
+		int xTexMul = 1);
 
 	///
 	/// Check the fuel cell status to determine whether it's in a 'bad' state that we

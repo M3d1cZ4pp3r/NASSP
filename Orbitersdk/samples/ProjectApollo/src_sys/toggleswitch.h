@@ -31,8 +31,10 @@
 
 #include "nasspdefs.h"
 #include "nasspsound.h"
+#include "replication/ReplicationTypes.h"
 
 #include <vector>
+#include <cstdint>
 #include "cautionwarning.h"
 #include "powersource.h"
 #include "nasspdefs.h"
@@ -81,6 +83,17 @@ class SwitchRow;
 class PanelSwitchScenarioHandler;
 class PanelSwitchCallbackInterface;
 
+// Classifies the single logical value exposed by a panel item to the generic panel provider.
+enum class PanelReplicationValueType { DiscreteInput, ContinuousInput, IndicatorPresentation,
+	MeterPresentation, Excluded };
+
+using PanelReplicationValue = std::uint64_t;
+
+// Discrete controls retain their complete 32-bit NASSP state in the low bits.
+constexpr PanelReplicationValue PanelReplicationStateMask = UINT64_C(0x00000000FFFFFFFF);
+constexpr PanelReplicationValue PanelReplicationHeld = UINT64_C(0x4000000000000000);
+constexpr PanelReplicationValue PanelReplicationGuard = UINT64_C(0x8000000000000000);
+
 class PanelSwitchCallbackInterface;
 ///
 /// This is the base class for panel items. Items using this class can be looked up by name,
@@ -99,6 +112,7 @@ public:
 	PanelSwitchItem *GetNext() { return next; };
 	void SetNextForScenario(PanelSwitchItem *s) { nextForScenario = s; };
 	PanelSwitchItem *GetNextForScenario() { return nextForScenario; };
+	const PanelSwitchItem *GetNextForScenario() const { return nextForScenario; };
 
 	///
 	/// Force an object to fail, or return it to correct operation, and set the
@@ -194,6 +208,106 @@ public:
 	/// \param value State to set.
 	///
 	virtual void SetState(int value);
+
+	///
+	/// \brief Apply a crew input received from another simulator.
+	/// \param value State received from the remote simulator.
+	///
+	virtual void ApplyRemoteInput(int value);
+
+	///
+	/// \brief Set the state shown by a replica without local input effects.
+	/// \param value State received from the authority.
+	///
+	virtual void ApplyReplicatedState(int value);
+
+	///
+	/// \brief Get the kind of value this item provides for replication.
+	/// \return Type of the replicated value, or Excluded if the item is not replicated.
+	///
+	virtual PanelReplicationValueType GetReplicationValueType() const;
+
+	///
+	/// \brief Get the current value used for replication.
+	/// \param value Receives the current value.
+	/// \return True if the value was captured successfully.
+	///
+	virtual bool CaptureReplicationValue(PanelReplicationValue &value);
+
+	///
+	/// \brief Write the current value to a replication payload.
+	/// \param writer Payload writer to receive the value.
+	/// \return True if the value was written successfully.
+	///
+	virtual bool WriteReplicationValue(ReplicationWriter &writer);
+
+	///
+	/// \brief Read this item's value from a replication payload.
+	/// \param reader Payload reader containing the value.
+	/// \param value Receives the decoded value.
+	/// \return True if the value was read successfully.
+	///
+	virtual bool ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const;
+
+	///
+	/// \brief Get the number of bits used for the item's state.
+	/// \return Number of bits used for the state value.
+	///
+	virtual unsigned int ReplicationStateBitCount() const;
+
+	///
+	/// \brief Check whether the payload includes the held setting.
+	/// \return True if the held setting is included.
+	///
+	virtual bool ReplicatesHeldState() const;
+
+	///
+	/// \brief Check whether the payload includes the guard state.
+	/// \return True if the guard state is included.
+	///
+	virtual bool ReplicatesGuardState() const;
+
+	///
+	/// \brief Get the largest number of bits this item can write.
+	/// \return Maximum number of bits written for this item.
+	///
+	virtual unsigned int MaximumReplicationBits() const;
+
+	///
+	/// \brief Get the largest state accepted from a replication payload.
+	/// \return Largest accepted state value.
+	///
+	virtual std::uint32_t MaximumReplicationState() const;
+
+	///
+	/// \brief Check a received value without changing the item.
+	/// \param valueBits Value to check.
+	/// \return True if the value can be applied to this item.
+	///
+	virtual bool ValidateReplicationValue(PanelReplicationValue valueBits) const;
+
+	///
+	/// \brief Apply a validated replication value.
+	/// \param valueBits Value to apply.
+	/// \param purpose Reason for applying the value.
+	///
+	virtual void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose);
+
+	///
+	/// \brief Clear values that only apply while this item is a replica.
+	///
+	virtual void ClearReplicationPresentation();
+
+	///
+	/// \brief Use the given revision counter to report value changes.
+	/// \param revision Revision counter to update, or NULL to stop tracking changes.
+	///
+	void TrackReplicationRevision(Revision *revision) { replicationRevision = revision; }
+
+	///
+	/// \brief Report that this item's replication value changed.
+	///
+	void NotifyReplicationValueChanged() { if (replicationRevision) ++*replicationRevision; }
 
 	///
 	/// \brief Check the power state.
@@ -314,6 +428,8 @@ protected:
 	PanelSwitchItem *next;
 	PanelSwitchItem *nextForScenario;
 	PanelSwitchCallbackInterface *callback;
+	/// Revision counter updated when this item's replication value changes, or NULL if it is not tracked.
+	Revision *replicationRevision;
 };
 
 ///
@@ -337,7 +453,7 @@ public:
 	void SetOffset(int xo, int yo) {xOffset = xo; yOffset = yo; };
 	void SetSpringLoaded(int springloaded) { springLoaded = springloaded; };
 	bool IsSpringLoaded() { return (springLoaded != SPRINGLOADEDSWITCH_NONE); };
-	void SetHeld(bool s) { Held = s; };
+	void SetHeld(bool s) { if (Held != s) { Held = s; NotifyReplicationValueChanged(); } };
 	bool IsHeld() { return Held; };
 	void SetActive(bool s);
 	void SetSideways(int s) { Sideways = s; }
@@ -363,10 +479,19 @@ public:
 	virtual void SaveState(FILEHANDLE scn);
 	virtual void LoadState(char *line);
 	virtual void SetState(int value); //Needed to properly process set states from toggle switches.
+	void ApplyRemoteInput(int value);
+	void ApplyReplicatedState(int value);
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
+	unsigned int ReplicationStateBitCount() const override { return 1; }
+	bool ReplicatesHeldState() const override { return springLoaded != SPRINGLOADEDSWITCH_NONE; }
+	std::uint32_t MaximumReplicationState() const override { return 1; }
 	virtual void timestep(double missionTime);
 	virtual void DefineMeshGroup(UINT _grpIndex);
 
 protected:
+	virtual bool IsSpringReturn(int newState) const;
+
 	virtual void InitSound(SoundLib *s);
 	virtual void DoDrawSwitch(SURFHANDLE DrawSurface);
 	bool DoCheckMouseClick(int event, int mx, int my);
@@ -485,6 +610,8 @@ protected:
 class ThreePosSwitch: public ToggleSwitch {
 
 public:
+	unsigned int ReplicationStateBitCount() const override { return 2; }
+	std::uint32_t MaximumReplicationState() const override { return 2; }
 	void DrawSwitch(SURFHANDLE DrawSurface);
 	void DrawSwitchVC(int id, int event, SURFHANDLE drawSurface);
 	bool CheckMouseClick(int event, int mx, int my);
@@ -495,6 +622,9 @@ public:
 	bool IsUp() { return (GetState() == THREEPOSSWITCH_UP); };
 
 	bool CheckMouseClickVC(int event, VECTOR3 &p);
+
+protected:
+	bool IsSpringReturn(int newState) const override;
 };
 
 ///
@@ -506,6 +636,8 @@ public:
 class FivePosSwitch: public ToggleSwitch {
 
 public:
+	unsigned int ReplicationStateBitCount() const override { return 3; }
+	std::uint32_t MaximumReplicationState() const override { return 4; }
 	FivePosSwitch();
 	virtual ~FivePosSwitch();
 	void DefineVCAnimations(UINT vc_idx);
@@ -523,6 +655,7 @@ public:
 	bool IsLeft() { return (GetState() == FIVEPOSSWITCH_LEFT); };
 	bool IsRight() { return (GetState() == FIVEPOSSWITCH_RIGHT); };
 protected:
+	bool IsSpringReturn(int newState) const override;
 	MGROUP_ROTATE* pswitchroty;
 	UINT anim_switchy;
 	VECTOR3 diry;
@@ -872,6 +1005,7 @@ protected:
 class MasterAlarmSwitch: public PushSwitch {
 
 public:
+	PanelReplicationValueType GetReplicationValueType() const override { return PanelReplicationValueType::Excluded; }
 	void Init(CautionWarningSystem *c) { cws = c; };
 	int GetState();
 	void SetState(int value);
@@ -975,7 +1109,10 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	int GetGuardState() { return guardState; };
-	void SetGuardState(bool s) { guardState = s; };
+	void SetGuardState(bool s) { if (guardState != s) { guardState = s; NotifyReplicationValueChanged(); } };
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
+	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
 	void Unguard() { guardState = 1; };
 	void Guard();
@@ -1108,7 +1245,10 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	int GetGuardState() { return guardState; };
-	void SetGuardState(bool s) { guardState = s; };
+	void SetGuardState(bool s) { if (guardState != s) { guardState = s; NotifyReplicationValueChanged(); } };
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
+	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
 	void Unguard() { guardState = 1; };
 	void Guard();
@@ -1159,7 +1299,10 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	int GetGuardState() { return guardState; };
-	void SetGuardState(bool s) { guardState = s; };
+	void SetGuardState(bool s) { if (guardState != s) { guardState = s; NotifyReplicationValueChanged(); } };
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
+	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
 	void Unguard() { guardState = 1; };
 	void Guard();
@@ -1207,7 +1350,13 @@ public:
 	virtual int GetState();
 
 	//Returns displayed value (not animation state)
-	double GetValue();
+	double GetValue() const;
+	// Sets the continuous position shown by a replica.
+	bool SetReplicatedValue(double value);
+	PanelReplicationValueType GetReplicationValueType() const override;
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	//Returns animation state (0-1), could be overloaded to provide output voltage
 	virtual double GetOutput();
 
@@ -1333,6 +1482,9 @@ public:
 	int GetState();
 	operator int();
 	virtual void SetState(int value);
+	void ApplyReplicatedState(int value);
+	unsigned int ReplicationStateBitCount() const override;
+	std::uint32_t MaximumReplicationState() const override;
 	void SoundEnabled(bool on) { soundEnabled = on; };
 	void SetWraparound(bool w) { Wraparound = w; };
 
@@ -1408,6 +1560,16 @@ public:
 	void LoadState(char *line);
 	virtual int GetState() { return state; };
 	virtual void SetState(int s) { state = s; };
+	int GetDisplayState() const { return (int)displayState; };
+	// Sets the talkback state shown by a replica.
+	void SetReplicatedDisplayState(int state) { replicatedDisplayState = state; };
+	void ClearReplicatedDisplayState() { replicatedDisplayState = -1; };
+	PanelReplicationValueType GetReplicationValueType() const override;
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	unsigned int ReplicationStateBitCount() const override { return 2; }
+	std::uint32_t MaximumReplicationState() const override { return 3; }
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
+	void ClearReplicationPresentation() override;
 
 //	int operator=(const int b) { state = b; return state; };
 //	operator int() {return state; };
@@ -1416,6 +1578,7 @@ protected:
 	int state; // Changed to INT for extended capabilities hackery
 	double displayState;	//0: false, 1: moving, 2: moving, 3: true
 	bool failOpen;
+	int replicatedDisplayState; // Negative means the normal locally calculated display state is used.
 	int	x;
 	int y;
 	int width;
@@ -1440,6 +1603,15 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	double GetDisplayValue();
+	double GetCurrentDisplayValue() const { return displayValue; };
+	// Sets the meter value shown by a replica.
+	void SetReplicatedDisplayValue(double value) { replicatedDisplayValue = value; hasReplicatedDisplayValue = true; };
+	void ClearReplicatedDisplayValue() { hasReplicatedDisplayValue = false; };
+	PanelReplicationValueType GetReplicationValueType() const override;
+	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
+	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
+	void ClearReplicationPresentation() override;
 
 	virtual double QueryValue() = 0;
 	virtual void DoDrawSwitch(double v, SURFHANDLE drawSurface) = 0;
@@ -1458,6 +1630,8 @@ protected:
 	double minMaxTime;
 	SwitchRow *switchRow;
 	double lastDrawTime;
+	double replicatedDisplayValue;
+	bool hasReplicatedDisplayValue; // Selects the authority value instead of querying local systems. That's a workaround since we don't have the role available here yet.
 
 	VESSEL *OurVessel;
 
@@ -1517,6 +1691,7 @@ public:
 //	int operator=(const int b);
 //	operator int();
 	virtual void SetState(int value);
+	void ApplyReplicatedState(int value);
 
 	void DefineVCAnimations(UINT vc_idx);
 	void DefineMeshGroup(UINT _grpIndex);
@@ -1546,6 +1721,7 @@ protected:
 class HandcontrollerSwitch: public PanelSwitchItem {
 
 public:
+	PanelReplicationValueType GetReplicationValueType() const override { return PanelReplicationValueType::Excluded; }
 	HandcontrollerSwitch();
 	virtual ~HandcontrollerSwitch();
 
@@ -1716,6 +1892,8 @@ public:
 	PanelSwitchScenarioHandler() { switchList = 0; };
 	void RegisterSwitch(PanelSwitchItem *s);
 	PanelSwitchItem* GetSwitch(char *name);
+	PanelSwitchItem *GetFirstSwitch() { return switchList; };
+	const PanelSwitchItem *GetFirstSwitch() const { return switchList; };
 	void SaveState(FILEHANDLE scn);
 	void LoadState(FILEHANDLE scn);
 
