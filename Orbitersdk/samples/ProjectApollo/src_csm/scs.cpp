@@ -35,6 +35,9 @@
 #include "tracer.h"
 #include "papi.h"
 
+#include <climits>
+#include <cmath>
+#include <cstring>
 #include <time.h>
 
 //#include "afxdlgs.h"  // This header allows file write dialog for Scroll output...  HACKED.
@@ -1707,6 +1710,38 @@ void ASCP::LoadState(FILEHANDLE scn){
 
 
 // EDA
+namespace
+{
+const char EDAPresentationGroupKey[] = "presentation";
+
+bool WriteEDAVector(ReplicationWriter &writer, const VECTOR3 &value)
+{
+	if (!writer.WriteScalar(value.x))
+		return false;
+	if (!writer.WriteScalar(value.y))
+		return false;
+	if (!writer.WriteScalar(value.z))
+		return false;
+	return true;
+}
+
+bool ReadEDAVector(const ReplicationReader &reader, VECTOR3 &value)
+{
+	if (!reader.ReadScalar(value.x))
+		return false;
+	if (!reader.ReadScalar(value.y))
+		return false;
+	if (!reader.ReadScalar(value.z))
+		return false;
+	return true;
+}
+
+bool IsFiniteEDAVector(const VECTOR3 &value)
+{
+	return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+}
+
 EDA::EDA(){
 	sat = NULL; // Initialize
 	ac_source1 = NULL;
@@ -1722,11 +1757,122 @@ EDA::EDA(){
 	FDAI1AttitudeError = _V(0, 0, 0);
 	FDAI2AttitudeError = _V(0, 0, 0);
 	InstrAttitudeError = _V(0, 0, 0);
+	replicatedPresentationActive = false;
 	GPFPIPitch[0] = GPFPIPitch[1] = 0.0;
 	GPFPIYaw[0] = GPFPIYaw[1] = 0.0;
 
 	ResetRelays();
 	ResetTransistors();
+}
+
+const char *EDA::ComponentKey() const
+{
+	return "csm.eda";
+}
+
+ProviderResult EDA::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	const char *fields[] = {
+		"fdai1_attitude_x", "fdai1_attitude_y", "fdai1_attitude_z",
+		"fdai2_attitude_x", "fdai2_attitude_y", "fdai2_attitude_z",
+		"fdai1_rate_x", "fdai1_rate_y", "fdai1_rate_z",
+		"fdai2_rate_x", "fdai2_rate_y", "fdai2_rate_z",
+		"fdai1_error_x", "fdai1_error_y", "fdai1_error_z",
+		"fdai2_error_x", "fdai2_error_y", "fdai2_error_z"
+	};
+	ReplicationSchemaBuilder schema;
+	for (unsigned int i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+		schema.AddString(fields[i]);
+		schema.AddUint32(sizeof(double) * CHAR_BIT);
+	}
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = EDAPresentationGroupKey;
+	presentation.schemaId = schema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 33;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = 18 * sizeof(double);
+	catalog.AddGroup(presentation);
+	return ProviderResult::Success;
+}
+
+ProviderResult EDA::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &)
+{
+	if (strcmp(groupKey, EDAPresentationGroupKey) != 0)
+		return ProviderResult::Unsupported;
+
+	if (!WriteEDAVector(writer, FDAI1Attitude))
+		return ProviderResult::BufferTooSmall;
+	if (!WriteEDAVector(writer, FDAI2Attitude))
+		return ProviderResult::BufferTooSmall;
+	if (!WriteEDAVector(writer, FDAI1AttitudeRate))
+		return ProviderResult::BufferTooSmall;
+	if (!WriteEDAVector(writer, FDAI2AttitudeRate))
+		return ProviderResult::BufferTooSmall;
+	if (!WriteEDAVector(writer, FDAI1AttitudeError))
+		return ProviderResult::BufferTooSmall;
+	if (!WriteEDAVector(writer, FDAI2AttitudeError))
+		return ProviderResult::BufferTooSmall;
+	return ProviderResult::Success;
+}
+
+ProviderResult EDA::ReadReplication(const ReplicationReader &reader, EDA *destination) const
+{
+	VECTOR3 fdai1Attitude;
+	VECTOR3 fdai2Attitude;
+	VECTOR3 fdai1Rate;
+	VECTOR3 fdai2Rate;
+	VECTOR3 fdai1Error;
+	VECTOR3 fdai2Error;
+
+	if (!ReadEDAVector(reader, fdai1Attitude))
+		return ProviderResult::Malformed;
+	if (!ReadEDAVector(reader, fdai2Attitude))
+		return ProviderResult::Malformed;
+	if (!ReadEDAVector(reader, fdai1Rate))
+		return ProviderResult::Malformed;
+	if (!ReadEDAVector(reader, fdai2Rate))
+		return ProviderResult::Malformed;
+	if (!ReadEDAVector(reader, fdai1Error))
+		return ProviderResult::Malformed;
+	if (!ReadEDAVector(reader, fdai2Error))
+		return ProviderResult::Malformed;
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (!IsFiniteEDAVector(fdai1Attitude) || !IsFiniteEDAVector(fdai2Attitude) ||
+		!IsFiniteEDAVector(fdai1Rate) || !IsFiniteEDAVector(fdai2Rate) ||
+		!IsFiniteEDAVector(fdai1Error) || !IsFiniteEDAVector(fdai2Error))
+		return ProviderResult::Rejected;
+
+	if (destination) {
+		destination->FDAI1Attitude = fdai1Attitude;
+		destination->FDAI2Attitude = fdai2Attitude;
+		destination->FDAI1AttitudeRate = fdai1Rate;
+		destination->FDAI2AttitudeRate = fdai2Rate;
+		destination->FDAI1AttitudeError = fdai1Error;
+		destination->FDAI2AttitudeError = fdai2Error;
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult EDA::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
+{
+	if (strcmp(groupKey, EDAPresentationGroupKey) != 0 || context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+	return ReadReplication(reader, NULL);
+}
+
+void EDA::Apply(const char *, const ReplicationReader &reader, const ApplyContext &context)
+{
+	if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !replicatedPresentationActive)
+		return;
+	ReadReplication(reader, this);
+}
+
+void EDA::OnRoleChanged(ReplicationRole role)
+{
+	replicatedPresentationActive = role == ReplicationRole::Replica;
 }
 
 void EDA::Init(Saturn *vessel){

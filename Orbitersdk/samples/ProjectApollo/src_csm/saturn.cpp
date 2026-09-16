@@ -481,6 +481,8 @@ Saturn::Saturn(OBJHANDLE hObj, int fmodel) : ProjectApolloConnectorVessel (hObj,
 	vesim(&cbCSMVesim, this),
 	CueCards(vcidx, this, 17),
 	Failures(this),
+	fdaiRight("csm.fdai.right"),
+	fdaiLeft("csm.fdai.left"),
 	panelControlProvider(PSH),
 	lightingProvider(LeftFloodLights, RightFloodLights, LEBFloodLights, LeftIntegralLights, RightIntegralLights, LEBIntegralLights, LeftNumericLights, LEBNumericLights)
 #pragma warning ( pop ) // disable:4355
@@ -1221,6 +1223,24 @@ void Saturn::RegisterReplicationProviders()
 
 	const ReplicationHub::RegistrationResult lebDskyResult = hub.Register(dsky2);
 	if (lebDskyResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult edaResult = hub.Register(eda);
+	if (edaResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult leftFdaiResult = hub.Register(fdaiLeft);
+	if (leftFdaiResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult rightFdaiResult = hub.Register(fdaiRight);
+	if (rightFdaiResult != ReplicationHub::RegistrationResult::Success) {
 		hub.UnregisterAll();
 		return;
 	}
@@ -3465,6 +3485,10 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 
 	if (!IsMultiplayerReplica()) {
 		SystemsTimestep(simt, simdt, mjd);
+	}
+	else {
+		// Needed to copy replicated EDA values to display on FDAI
+		FDAITimestep(simt, simdt);
 	}
 
 	if(stage < LAUNCH_STAGE_SIVB) {

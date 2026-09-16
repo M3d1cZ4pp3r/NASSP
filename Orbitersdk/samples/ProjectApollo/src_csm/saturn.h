@@ -4279,6 +4279,7 @@ protected:
 	void GenericTimestep(double simt, double simdt, double mjd);
 	void SystemsInit();
 	void SystemsTimestep(double simt, double simdt, double mjd);
+	void FDAITimestep(double simt, double simdt);
 	void SystemsInternalTimestep(double simdt);
 	void JoystickTimestep();
 	void LimitSetThrusterDir (THRUSTER_HANDLE th, const VECTOR3 &dir);

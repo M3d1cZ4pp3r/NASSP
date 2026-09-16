@@ -26,6 +26,7 @@
 #pragma include_alias( <fstream.h>, <fstream> )
 #include "Orbitersdk.h"
 #include <stdio.h>
+#include <cstring>
 
 #include "nasspdefs.h"
 
@@ -34,7 +35,12 @@
 
 #include "FDAI.h"
 
-FDAI::FDAI() {
+namespace
+{
+const char FDAIPresentationGroupKey[] = "presentation";
+}
+
+FDAI::FDAI(const char *instanceKey) : replicationInstanceKey(instanceKey) {
 
 	init = 0;
 	ScrX = 0;
@@ -201,6 +207,72 @@ void FDAI::SetAttitude(VECTOR3 attitude) {
 	target.y = -attitude.x;	// roll
 	target.z = attitude.y;	// pitch
 	target.x = attitude.z;	// yaw
+}
+
+const char *FDAI::ComponentKey() const
+{
+	return replicationInstanceKey;
+}
+
+ProviderResult FDAI::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	ReplicationSchemaBuilder schema;
+	schema.AddString("powered");
+	schema.AddUint32(1);
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = FDAIPresentationGroupKey;
+	presentation.schemaId = schema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 33;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = sizeof(std::uint8_t);
+	catalog.AddGroup(presentation);
+	return ProviderResult::Success;
+}
+
+ProviderResult FDAI::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &)
+{
+	if (strcmp(groupKey, FDAIPresentationGroupKey) != 0)
+		return ProviderResult::Unsupported;
+
+	if (!writer.WriteScalar(IsPowered()))
+		return ProviderResult::BufferTooSmall;
+	return ProviderResult::Success;
+}
+
+ProviderResult FDAI::ReadReplication(const ReplicationReader &reader, FDAI *destination) const
+{
+	ReplicatedPresentation presentation;
+
+	if (!reader.ReadScalar(presentation.powered))
+		return ProviderResult::Malformed;
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+
+	if (destination) {
+		*destination->replicatedData = presentation;
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult FDAI::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
+{
+	if (strcmp(groupKey, FDAIPresentationGroupKey) != 0 || context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+	return ReadReplication(reader, NULL);
+}
+
+void FDAI::Apply(const char *, const ReplicationReader &reader, const ApplyContext &context)
+{
+	if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !replicatedData.IsActive())
+		return;
+	ReadReplication(reader, this);
+}
+
+void FDAI::OnRoleChanged(ReplicationRole role)
+{
+	replicatedData.SetActive(role == ReplicationRole::Replica);
 }
 
 void FDAI::RotateBall(double simdt) {
@@ -649,6 +721,9 @@ pBGR MyGetDibBits(HDC hdcSrc, HBITMAP hBmpSrc, int nx, int ny)
 bool FDAI::IsPowered()
 
 {
+	if (replicatedData.IsActive())
+		return replicatedData->powered;
+
 	if (ACSource && DCSource) {
 		if (ACSource->Voltage() > SP_MIN_ACVOLTAGE && DCSource->Voltage() > SP_MIN_DCVOLTAGE)
 			return true;

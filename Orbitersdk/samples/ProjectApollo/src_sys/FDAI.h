@@ -27,11 +27,14 @@
 
 #include < GL\gl.h >                                
 #include < GL\glu.h >
+#include "replication/IReplicationProvider.h"
+#include "replication/ReplicaOverrideData.h"
 
-class FDAI {
+class FDAI : public IReplicationProvider
+{
 
 public:
-	FDAI();
+	FDAI(const char *instanceKey = NULL);
 	virtual ~FDAI();
 	void Init(VESSEL *v);
 	void RegisterMe(int index, int x, int y);
@@ -41,6 +44,13 @@ public:
 		SURFHANDLE hFDAIRoll, SURFHANDLE hFDAIOff, SURFHANDLE hFDAINeedles, int smooth);
 	void AnimateFDAI(VECTOR3 rates, VECTOR3 errors, UINT animR, UINT animP, UINT animY, UINT errorR, UINT errorP, UINT errorY, UINT rateR, UINT rateP, UINT rateY);
 	void SetAttitude(VECTOR3 attitude);
+
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	void SaveState(FILEHANDLE scn, char *start_str, char *end_str);
 	void LoadState(FILEHANDLE scn, char *end_str);
@@ -52,6 +62,11 @@ public:
 	void WireTo(e_object *dc) { DCSource = dc; noAC = true; };
 
 protected:
+	struct ReplicatedPresentation
+	{
+		bool powered;
+	};
+
 	int ScrX;
 	int ScrY;			//coords on screen
 	int idx;			//index on the panel list 
@@ -79,8 +94,11 @@ protected:
 	void RotateBall(double simdt);
 	void MoveBall2D();
 	int LoadOGLBitmap(char *filename);
+	ProviderResult ReadReplication(const ReplicationReader &reader, FDAI *destination) const;
 
 	VESSEL *vessel;
+	const char *replicationInstanceKey;
+	ReplicaOverrideData<ReplicatedPresentation> replicatedData;
 };
 
 //

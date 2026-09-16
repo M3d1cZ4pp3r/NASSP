@@ -26,6 +26,7 @@
 #pragma once
 
 #include "DelayTimer.h"
+#include "replication/IReplicationProvider.h"
 
 class Saturn;
 
@@ -263,7 +264,8 @@ protected:
 #define EDA_START_STRING	"EDA_BEGIN"
 #define EDA_END_STRING		"EDA_END"
 
-class EDA {
+class EDA : public IReplicationProvider
+{
 
 public: // Same stuff about speed and I'm lazy too.
 	EDA();															// Cons
@@ -272,6 +274,12 @@ public: // Same stuff about speed and I'm lazy too.
 	void Timestep(double simdt);
 	void SaveState(FILEHANDLE scn);                                // SaveState callback
 	void LoadState(FILEHANDLE scn);                                // LoadState callback
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	VECTOR3 GetFDAI1Attitude() { return FDAI1Attitude; }
 	VECTOR3 GetFDAI2Attitude() { return FDAI2Attitude; }
@@ -307,6 +315,8 @@ protected:
 	void ResetRelays();
 	void ResetTransistors();
 	double NormalizeAngle(double ang);
+	ProviderResult ReadReplication(const ReplicationReader &reader, EDA *destination) const;
+	bool replicatedPresentationActive;
 
 	//Scaled -1 to 1
 	VECTOR3 FDAI1AttitudeRate;

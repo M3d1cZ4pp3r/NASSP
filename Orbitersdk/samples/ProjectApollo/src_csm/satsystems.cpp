@@ -798,6 +798,14 @@ void Saturn::SetPipeMaxFlow(char *pipe, double flow) {
 	p->flowMax = flow; 
 }
 
+void Saturn::FDAITimestep(double simt, double simdt)
+{
+	fdaiLeft.SetAttitude(eda.GetFDAI1Attitude());
+	fdaiLeft.Timestep(simt, simdt);
+	fdaiRight.SetAttitude(eda.GetFDAI2Attitude());
+	fdaiRight.Timestep(simt, simdt);
+}
+
 void Saturn::SystemsTimestep(double simt, double simdt, double mjd) {
 
 	//
@@ -860,10 +868,7 @@ void Saturn::SystemsTimestep(double simt, double simdt, double mjd) {
 		MissionTimer306Display.Timestep(simt, simdt, false);
 		EventTimerDisplay.Timestep(simt, simdt, true);
 		EventTimer306Display.Timestep(simt, simdt, true);
-		fdaiLeft.SetAttitude(eda.GetFDAI1Attitude());
-		fdaiLeft.Timestep(simt, simdt);
-		fdaiRight.SetAttitude(eda.GetFDAI2Attitude());
-		fdaiRight.Timestep(simt, simdt);
+		FDAITimestep(simt, simdt);
 		SPSPropellant.Timestep(simt, simdt);
 		JoystickTimestep();
 		EPSTimestep();
