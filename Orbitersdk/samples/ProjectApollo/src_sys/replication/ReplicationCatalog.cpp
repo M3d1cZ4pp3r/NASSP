@@ -34,20 +34,14 @@ std::uint64_t HashUint32(std::uint64_t hash, std::uint32_t value)
 
 bool IsValidDescriptor(const ReplicationGroupDescriptor &descriptor)
 {
-	const bool validDelivery = descriptor.delivery == ReplicationDelivery::Reliable ||
-		descriptor.delivery == ReplicationDelivery::Unreliable;
-	const bool validPrediction = descriptor.prediction == PredictionMode::Off ||
-		descriptor.prediction == PredictionMode::On;
-	const bool unreliableCanRecover = descriptor.delivery != ReplicationDelivery::Unreliable ||
-		descriptor.periodicIntervalMs != 0;
-	return descriptor.schemaId && descriptor.maximumPayloadBytes && validDelivery && validPrediction &&
-		unreliableCanRecover;
+	const bool validDelivery = descriptor.delivery == ReplicationDelivery::Reliable || descriptor.delivery == ReplicationDelivery::Unreliable;
+	const bool validPrediction = descriptor.prediction == PredictionMode::Off || descriptor.prediction == PredictionMode::On;
+	const bool unreliableCanRecover = descriptor.delivery != ReplicationDelivery::Unreliable || descriptor.periodicIntervalMs != 0;
+	return descriptor.schemaId && descriptor.maximumPayloadBytes && validDelivery && validPrediction && unreliableCanRecover;
 }
-}
+} // namespace
 
-ReplicationSchemaBuilder::ReplicationSchemaBuilder() : schemaId(SchemaOffsetBasis)
-{
-}
+ReplicationSchemaBuilder::ReplicationSchemaBuilder() : schemaId(SchemaOffsetBasis) {}
 
 void ReplicationSchemaBuilder::AddString(const char *value)
 {
@@ -109,10 +103,7 @@ ReplicationCatalog::BuildResult ReplicationCatalog::Build(const std::vector<IRep
 		}
 
 		// Group IDs must not depend on registration order or provider memory addresses.
-		std::sort(component.groups.begin(), component.groups.end(),
-			[](const ReplicationCatalogGroup &left, const ReplicationCatalogGroup &right) {
-				return left.key < right.key;
-			});
+		std::sort(component.groups.begin(), component.groups.end(), [](const ReplicationCatalogGroup &left, const ReplicationCatalogGroup &right) { return left.key < right.key; });
 		for (std::size_t index = 1; index < component.groups.size(); index++) {
 			if (component.groups[index - 1].key == component.groups[index].key)
 				return BuildResult::DuplicateGroupKey;
@@ -122,10 +113,7 @@ ReplicationCatalog::BuildResult ReplicationCatalog::Build(const std::vector<IRep
 	}
 
 	// Component IDs receive the same stable ordering rule as group IDs.
-	std::sort(builtComponents.begin(), builtComponents.end(),
-		[](const ReplicationCatalogComponent &left, const ReplicationCatalogComponent &right) {
-			return left.key < right.key;
-		});
+	std::sort(builtComponents.begin(), builtComponents.end(), [](const ReplicationCatalogComponent &left, const ReplicationCatalogComponent &right) { return left.key < right.key; });
 	for (std::size_t index = 1; index < builtComponents.size(); index++) {
 		if (builtComponents[index - 1].key == builtComponents[index].key)
 			return BuildResult::DuplicateComponentKey;

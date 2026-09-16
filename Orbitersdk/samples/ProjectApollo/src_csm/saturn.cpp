@@ -135,6 +135,42 @@ VesimInputDefinition vesim_csm_inputs[CSM_AXIS_INPUT_CNT] = {
 
 void cbCSMVesim(int inputID, int eventType, int newValue, void *pdata) {
 	Saturn *pSaturn = (Saturn *)pdata;
+	DSKYPushSwitch *dsky1Switches[] = {
+		&pSaturn->DskySwitchProceed, &pSaturn->DskySwitchKeyRel,
+		&pSaturn->DskySwitchVerb, &pSaturn->DskySwitchNoun,
+		&pSaturn->DskySwitchEnter, &pSaturn->DskySwitchClear,
+		&pSaturn->DskySwitchPlus, &pSaturn->DskySwitchMinus,
+		&pSaturn->DskySwitchReset, &pSaturn->DskySwitchZero,
+		&pSaturn->DskySwitchOne, &pSaturn->DskySwitchTwo,
+		&pSaturn->DskySwitchThree, &pSaturn->DskySwitchFour,
+		&pSaturn->DskySwitchFive, &pSaturn->DskySwitchSix,
+		&pSaturn->DskySwitchSeven, &pSaturn->DskySwitchEight,
+		&pSaturn->DskySwitchNine};
+	DSKYPushSwitch *dsky2Switches[] = {
+		&pSaturn->Dsky2SwitchProceed, &pSaturn->Dsky2SwitchKeyRel,
+		&pSaturn->Dsky2SwitchVerb, &pSaturn->Dsky2SwitchNoun,
+		&pSaturn->Dsky2SwitchEnter, &pSaturn->Dsky2SwitchClear,
+		&pSaturn->Dsky2SwitchPlus, &pSaturn->Dsky2SwitchMinus,
+		&pSaturn->Dsky2SwitchReset, &pSaturn->Dsky2SwitchZero,
+		&pSaturn->Dsky2SwitchOne, &pSaturn->Dsky2SwitchTwo,
+		&pSaturn->Dsky2SwitchThree, &pSaturn->Dsky2SwitchFour,
+		&pSaturn->Dsky2SwitchFive, &pSaturn->Dsky2SwitchSix,
+		&pSaturn->Dsky2SwitchSeven, &pSaturn->Dsky2SwitchEight,
+		&pSaturn->Dsky2SwitchNine};
+
+	DSKYPushSwitch *dskySwitch = NULL;
+	if (inputID >= CSM_BUTTON_DSKY1_PRO && inputID <= CSM_BUTTON_DSKY1_NUM_9)
+		dskySwitch = dsky1Switches[inputID - CSM_BUTTON_DSKY1_PRO];
+	else if (inputID >= CSM_BUTTON_DSKY2_PRO && inputID <= CSM_BUTTON_DSKY2_NUM_9)
+		dskySwitch = dsky2Switches[inputID - CSM_BUTTON_DSKY2_PRO];
+	if (dskySwitch) {
+		if (eventType == VESIM_EVTTYPE_BUTTON_ON)
+			dskySwitch->VesimSwitchTo(1);
+		else if (eventType == VESIM_EVTTYPE_BUTTON_OFF)
+			dskySwitch->VesimSwitchTo(0);
+		return;
+	}
+
 	if (eventType == VESIM_EVTTYPE_BUTTON_ON) {
 		switch (inputID) {
 		case CSM_BUTTON_ROT_LIN:			
@@ -148,120 +184,6 @@ void cbCSMVesim(int inputID, int eventType, int newValue, void *pdata) {
 			break;
 		case CSM_BUTTON_INPUT_THC_CW:
 			pSaturn->MoveTHC(0);
-			break;
-		case CSM_BUTTON_DSKY1_PRO:
-			pSaturn->dsky.ProceedPressed();
-			break;
-		case CSM_BUTTON_DSKY1_KEY_REL:
-			pSaturn->dsky.KeyRel();
-			break;
-		case CSM_BUTTON_DSKY1_VERB:
-			pSaturn->dsky.VerbPressed();
-			break;
-		case CSM_BUTTON_DSKY1_NOUN:
-			pSaturn->dsky.NounPressed();
-			break;
-		case CSM_BUTTON_DSKY1_ENTR:
-			pSaturn->dsky.EnterPressed();
-			break;
-		case CSM_BUTTON_DSKY1_CLR:
-			pSaturn->dsky.ClearPressed();
-			break;
-		case CSM_BUTTON_DSKY1_PLUS:
-			pSaturn->dsky.PlusPressed();
-			break;
-		case CSM_BUTTON_DSKY1_MINUS:
-			pSaturn->dsky.MinusPressed();
-			break;
-		case CSM_BUTTON_DSKY1_RSET:
-			pSaturn->dsky.ResetPressed();
-			break;
-		case CSM_BUTTON_DSKY1_NUM_0:
-			pSaturn->dsky.NumberPressed(0);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_1:
-			pSaturn->dsky.NumberPressed(1);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_2:
-			pSaturn->dsky.NumberPressed(2);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_3:
-			pSaturn->dsky.NumberPressed(3);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_4:
-			pSaturn->dsky.NumberPressed(4);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_5:
-			pSaturn->dsky.NumberPressed(5);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_6:
-			pSaturn->dsky.NumberPressed(6);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_7:
-			pSaturn->dsky.NumberPressed(7);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_8:
-			pSaturn->dsky.NumberPressed(8);
-			break;
-		case CSM_BUTTON_DSKY1_NUM_9:
-			pSaturn->dsky.NumberPressed(9);
-			break;
-		case CSM_BUTTON_DSKY2_PRO:
-			pSaturn->dsky2.ProceedPressed();
-			break;
-		case CSM_BUTTON_DSKY2_KEY_REL:
-			pSaturn->dsky2.KeyRel();
-			break;
-		case CSM_BUTTON_DSKY2_VERB:
-			pSaturn->dsky2.VerbPressed();
-			break;
-		case CSM_BUTTON_DSKY2_NOUN:
-			pSaturn->dsky2.NounPressed();
-			break;
-		case CSM_BUTTON_DSKY2_ENTR:
-			pSaturn->dsky2.EnterPressed();
-			break;
-		case CSM_BUTTON_DSKY2_CLR:
-			pSaturn->dsky2.ClearPressed();
-			break;
-		case CSM_BUTTON_DSKY2_PLUS:
-			pSaturn->dsky2.PlusPressed();
-			break;
-		case CSM_BUTTON_DSKY2_MINUS:
-			pSaturn->dsky2.MinusPressed();
-			break;
-		case CSM_BUTTON_DSKY2_RSET:
-			pSaturn->dsky2.ResetPressed();
-			break;
-		case CSM_BUTTON_DSKY2_NUM_0:
-			pSaturn->dsky2.NumberPressed(0);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_1:
-			pSaturn->dsky2.NumberPressed(1);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_2:
-			pSaturn->dsky2.NumberPressed(2);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_3:
-			pSaturn->dsky2.NumberPressed(3);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_4:
-			pSaturn->dsky2.NumberPressed(4);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_5:
-			pSaturn->dsky2.NumberPressed(5);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_6:
-			pSaturn->dsky2.NumberPressed(6);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_7:
-			pSaturn->dsky2.NumberPressed(7);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_8:
-			pSaturn->dsky2.NumberPressed(8);
-			break;
-		case CSM_BUTTON_DSKY2_NUM_9:
-			pSaturn->dsky2.NumberPressed(9);
 			break;
 		case CSM_BUTTON_DIR_ULL:
 			pSaturn->DirectUllageButton.VesimSwitchTo(1);
@@ -285,12 +207,6 @@ void cbCSMVesim(int inputID, int eventType, int newValue, void *pdata) {
 	}
 	else if (eventType == VESIM_EVTTYPE_BUTTON_OFF) {
 		switch (inputID) {		
-		case CSM_BUTTON_DSKY1_PRO:
-			pSaturn->dsky.ProceedReleased();
-			break;
-		case CSM_BUTTON_DSKY2_PRO:
-			pSaturn->dsky2.ProceedReleased();
-			break;
 		case CSM_BUTTON_DIR_ULL:
 			pSaturn->DirectUllageButton.VesimSwitchTo(0);
 			break;
@@ -364,8 +280,8 @@ BOOL CALLBACK EnumAxesCallback( const DIDEVICEOBJECTINSTANCE* pdidoi, VOID* pSat
 Saturn::Saturn(OBJHANDLE hObj, int fmodel) : ProjectApolloConnectorVessel (hObj, fmodel), 
 	inertialData(this),
 	agc(soundlib, dsky, dsky2, imu, scdu, tcdu, Panelsdk),
-	dsky(soundlib, agc, Panelsdk, 015),
-	dsky2(soundlib, agc, Panelsdk, 016),
+	dsky(soundlib, agc, Panelsdk, 015, "csm.dsky.main"),
+	dsky2(soundlib, agc, Panelsdk, 016, "csm.dsky.leb"),
 	CMCDCBusFeeder("CMC-DCBus-Feeder", Panelsdk),
 	imu(agc, Panelsdk, inertialData),
 	scdu(agc, RegOPTX, 0140, 2),
@@ -565,7 +481,8 @@ Saturn::Saturn(OBJHANDLE hObj, int fmodel) : ProjectApolloConnectorVessel (hObj,
 	vesim(&cbCSMVesim, this),
 	CueCards(vcidx, this, 17),
 	Failures(this),
-	panelControlProvider(PSH)
+	panelControlProvider(PSH),
+	lightingProvider(LeftFloodLights, RightFloodLights, LEBFloodLights, LeftIntegralLights, RightIntegralLights, LEBIntegralLights, LeftNumericLights, LEBNumericLights)
 #pragma warning ( pop ) // disable:4355
 
 {	
@@ -1266,7 +1183,6 @@ void Saturn::initSaturn()
 
 		// Switch to compatible dock mode 
 		SetDockMode(0);
-
 		RegisterReplicationProviders();
 	}
 
@@ -1287,6 +1203,24 @@ void Saturn::RegisterReplicationProviders()
 
 	const ReplicationHub::RegistrationResult cautionWarningResult = hub.Register(cws);
 	if (cautionWarningResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult lightingResult = hub.Register(lightingProvider);
+	if (lightingResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult mainDskyResult = hub.Register(dsky);
+	if (mainDskyResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult lebDskyResult = hub.Register(dsky2);
+	if (lebDskyResult != ReplicationHub::RegistrationResult::Success) {
 		hub.UnregisterAll();
 		return;
 	}
@@ -1693,30 +1627,30 @@ void Saturn::clbkPostStep(double simt, double simdt, double mjd)
 		debugConnected = true;
 	}
 
-	if (!IsMultiplayerReplica()) {
-		inertialData.Timestep(simdt);
+	if (!IsMultiplayerReplica()) inertialData.Timestep(simdt);
 
-		if (stage >= PRELAUNCH_STAGE && !GenericFirstTimestep) {
+	if (!IsMultiplayerReplica() && stage >= PRELAUNCH_STAGE && !GenericFirstTimestep) {
 
-			//
-			// The SPS engine must be in post time step
-			// to inhibit Orbiter's thrust control
-			//
+		//
+		// The SPS engine must be in post time step 
+		// to inhibit Orbiter's thrust control
+		//
 
-			SPSEngine.Timestep(SimulatedTime, simdt);
+		SPSEngine.Timestep(SimulatedTime, simdt);
 
-			// Better acceleration measurement stability
-			imu.Timestep(simdt);
-			tcdu.Timestep(simdt);
-			scdu.Timestep(simdt);
-			ems.TimeStep(simdt);
-			CrewStatus.Timestep(simdt);
+		// Better acceleration measurement stability
+		imu.Timestep(simdt);
+		tcdu.Timestep(simdt);
+		scdu.Timestep(simdt);
+		ems.TimeStep(simdt);
+		CrewStatus.Timestep(simdt);
 
-			if (stage < CSM_LEM_STAGE)
-			{
-				iu->PostStep(simt, simdt, mjd);
-			}
+		if (stage < CSM_LEM_STAGE)
+		{
+			iu->PostStep(simt, simdt, mjd);
 		}
+	}
+	if (!IsMultiplayerReplica()) {
 		// Order is important, otherwise delayed springloaded switches are reset immediately
 		MainPanel.timestep(MissionTime);
 		checkControl.timestep(MissionTime, eventControl);
@@ -3706,9 +3640,9 @@ int Saturn::clbkConsumeDirectKey(char *kstate)
 	// Only override these keys if the user is holding no modifier keys, Alt only, or Ctrl + Alt.
 	if (GetAttitudeMode() == ATTITUDEMODE::ATTMODE_ROT && !(KEYMOD_CONTROL(kstate) && !KEYMOD_ALT(kstate)) && !KEYMOD_SHIFT(kstate)) {
 		// Possible deflection amounts are:
-		// No key modifiers: 10.5Â° (max proportional rate, but not hardover)
-		// Alt: 11.5Â° (full deflection, triggering direct switches)
-		// Ctrl + Alt: 1.51Â° (triggering breakout switches)
+		// No key modifiers: 10.5° (max proportional rate, but not hardover)
+		// Alt: 11.5° (full deflection, triggering direct switches)
+		// Ctrl + Alt: 1.51° (triggering breakout switches)
 		double deflectionDegrees = KEYMOD_ALT(kstate) ? KEYMOD_CONTROL(kstate) ? 1.51 : 11.5 : 10.5;
 		double deflectionPercent = deflectionDegrees / 11.5;
 

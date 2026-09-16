@@ -2027,7 +2027,7 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 
 		// First Darken All Lights
 //		double floodRotaryValue = 0.0; //FloodRotarySwitch.GetOutput();
-		double floodRotaryValue = (LeftFloodLights.GetCombinedOutput() + RightFloodLights.GetCombinedOutput() + LEBFloodLights.GetCombinedOutput()) / 60;	// add some fake ambient light, max 10% of all floodlights
+		double floodRotaryValue = (LeftFloodLights.GetDisplayedOutput() + RightFloodLights.GetDisplayedOutput() + LEBFloodLights.GetDisplayedOutput()) / 60;	// add some fake ambient light, max 10% of all floodlights
 
 		// Hardcoded Materials with no Texture
 		SetVCLighting(vcidx,   VC_MAT_FDAI_errorneedle, MAT_LIGHT, floodRotaryValue, 1);
@@ -2035,14 +2035,14 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 
 		// Flood Lights Panel 8
 		SetVCLighting(vcidx, FloodLights_P8, MAT_LIGHT, floodRotaryValue, NUM_ELEMENTS(FloodLights_P8));
-		floodLight_P8->SetIntensity(LeftFloodLights.GetCombinedOutput());
+		floodLight_P8->SetIntensity(LeftFloodLights.GetDisplayedOutput());
 
 		// CMVC Ordeal Lighting Switch
 		SetVCLighting(vcidx, IntegralLights_CMVC_Ordeal, MAT_EMISSION, ordeal.LightingPower(), NUM_ELEMENTS(IntegralLights_CMVC_Ordeal));
 
 		// Integral Lights Panel 8
-		SetVCLighting(vcidx, IntegralLights_P8, MAT_EMISSION, LeftIntegralLights.GetOutput(), NUM_ELEMENTS(IntegralLights_P8));
-		SetVCLighting(vcidx, IntergralLights_P8_NTex, MAT_LIGHT, LeftIntegralLights.GetOutput() + floodRotaryValue, NUM_ELEMENTS(IntergralLights_P8_NTex));
+		SetVCLighting(vcidx, IntegralLights_P8, MAT_EMISSION, LeftIntegralLights.GetDisplayedOutput(), NUM_ELEMENTS(IntegralLights_P8));
+		SetVCLighting(vcidx, IntergralLights_P8_NTex, MAT_LIGHT, LeftIntegralLights.GetDisplayedOutput() + floodRotaryValue, NUM_ELEMENTS(IntergralLights_P8_NTex));
 
 		// External meshes
 		SetVCLighting(seatsunfoldedidx, CMVCSeatsUnFolded, MAT_LIGHT, floodRotaryValue, NUM_ELEMENTS(CMVCSeatsUnFolded));
@@ -2051,24 +2051,24 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 
 		// Numerics Lights Panel 8
 //      SetVCLighting(vcidx,NumericLights_P8, MAT_LIGHT,NumericRotarySwitch.GetOutput(), NUM_ELEMENTS(NumericLights_P8));
-		SetVCLighting(vcidx, NumericLights_P8_NTex, MAT_LIGHT, LeftNumericLights.GetOutput(), NUM_ELEMENTS(NumericLights_P8_NTex));
-		SetVCLighting(vcidx, VC_MAT_DSKY_P8_t, MAT_LIGHT, dsky.Variable_250VAC_Output.Voltage() / 250.0, 1);
+		SetVCLighting(vcidx, NumericLights_P8_NTex, MAT_LIGHT, LeftNumericLights.GetDisplayedOutput(), NUM_ELEMENTS(NumericLights_P8_NTex));
+		SetVCLighting(vcidx, VC_MAT_DSKY_P8_t, MAT_LIGHT, dsky.GetDisplayedSegmentBrightness(), 1);
 
 		// Integral Lights Panel 5
-		SetVCLighting(vcidx, IntegralLights_P5, MAT_EMISSION, RightIntegralLights.GetOutput(), NUM_ELEMENTS(IntegralLights_P5));
+		SetVCLighting(vcidx, IntegralLights_P5, MAT_EMISSION, RightIntegralLights.GetDisplayedOutput(), NUM_ELEMENTS(IntegralLights_P5));
 
 //		SetVCLighting(vcidx, FloodLights_P5, MAT_LIGHT, RightFloodRotarySwitch.GetOutput(), NUM_ELEMENTS(FloodLights_P5));
-		floodLight_P5->SetIntensity(RightFloodLights.GetCombinedOutput());
+		floodLight_P5->SetIntensity(RightFloodLights.GetDisplayedOutput());
 
 		// Integral Lights Panel 100
-		SetVCLighting(vcidx, IntegralLights_P100, MAT_EMISSION, LEBIntegralLights.GetOutput(), NUM_ELEMENTS(IntegralLights_P100));
-		SetVCLighting(vcidx, IntegralLights_P100_NoTex, MAT_LIGHT, LEBIntegralLights.GetOutput(), NUM_ELEMENTS(IntegralLights_P100_NoTex));
+		SetVCLighting(vcidx, IntegralLights_P100, MAT_EMISSION, LEBIntegralLights.GetDisplayedOutput(), NUM_ELEMENTS(IntegralLights_P100));
+		SetVCLighting(vcidx, IntegralLights_P100_NoTex, MAT_LIGHT, LEBIntegralLights.GetDisplayedOutput(), NUM_ELEMENTS(IntegralLights_P100_NoTex));
 
 //		SetVCLighting(vcidx, FloodLights_P100, MAT_LIGHT, Panel100FloodRotarySwitch.GetOutput(), NUM_ELEMENTS(FloodLights_P100));
-		floodLight_P100->SetIntensity(LEBFloodLights.GetCombinedOutput());
+		floodLight_P100->SetIntensity(LEBFloodLights.GetDisplayedOutput());
 
 		// Numerics Lights Panel 100
-		SetVCLighting(vcidx, NumericLights_P100, MAT_LIGHT, LEBNumericLights.GetOutput(), NUM_ELEMENTS(NumericLights_P100));
+		SetVCLighting(vcidx, NumericLights_P100, MAT_LIGHT, LEBNumericLights.GetDisplayedOutput(), NUM_ELEMENTS(NumericLights_P100));
 
 		// DSKY and Caution & Warning Lights
 		std::vector<DWORD> DSKY_Lights;
@@ -2084,7 +2084,7 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 		// ... and Read them
 		cws.GetCWLightStates(LightStates);
 
-		if (LeftNumericLights.Variable_115_5VAC_Output.Voltage() / 5.0) {
+		if (dsky.GetStatusLtPower()) {
 			if (dsky.UplinkLit())		{ DSKY_Lights.push_back(VC_MAT_DSKY_Lights_UPLINK_ACTY); }
 			if (dsky.NoAttLit())		{ DSKY_Lights.push_back(VC_MAT_DSKY_Lights_NO_ATT); }
 			if (dsky.StbyLit())			{ DSKY_Lights.push_back(VC_MAT_DSKY_Lights_STBY); }
@@ -2097,51 +2097,54 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 			if (dsky.TrackerLit())		{ DSKY_Lights.push_back(VC_MAT_DSKY_Lights_TRACKER); }
 		}
 
-		if (LEBNumericLights.Variable_115_5VAC_Output.Voltage() / 5.0) {
-			if (dsky.UplinkLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_UPLINK_ACTY); }
-			if (dsky.NoAttLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_NO_ATT); }
-			if (dsky.StbyLit())			{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_STBY); }
-			if (dsky.KbRelLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_KEY_REL); }
-			if (dsky.OprErrLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_OPR_ERR); }
-			if (dsky.TempLit())			{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_TEMP); }
-			if (dsky.GimbalLockLit())	{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_GIMBAL_LOCK); }
-			if (dsky.ProgLit())			{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_PROG); }
-			if (dsky.RestartLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_RESTART); }
-			if (dsky.TrackerLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_TRACKER); }
+		if (dsky2.GetStatusLtPower()) {
+			if (dsky2.UplinkLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_UPLINK_ACTY); }
+			if (dsky2.NoAttLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_NO_ATT); }
+			if (dsky2.StbyLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_STBY); }
+			if (dsky2.KbRelLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_KEY_REL); }
+			if (dsky2.OprErrLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_OPR_ERR); }
+			if (dsky2.TempLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_TEMP); }
+			if (dsky2.GimbalLockLit())	{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_GIMBAL_LOCK); }
+			if (dsky2.ProgLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_PROG); }
+			if (dsky2.RestartLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_RESTART); }
+			if (dsky2.TrackerLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_TRACKER); }
 		}
 
-		if (IsMultiplayerReplica()) {
-			// The authority supplies final lamp visibility, so frozen local C/W state does not filter it again.
-			SetVCLighting(vcidx, IntegralLights_CW_Lights, MAT_LIGHT, 0,
-				NUM_ELEMENTS(IntegralLights_CW_Lights));
-			const std::uint64_t lightBits = cws.GetDisplayedLightBits();
-			for (int i = 0; i < CWS_LIGHTS_PER_PANEL * 2; i++) {
-				if (lightBits & (UINT64_C(1) << i))
+		const bool replicatedCautionWarning = IsMultiplayerReplica();
+		const std::uint64_t replicatedLightBits = cws.GetDisplayedLightBits();
+		if (replicatedCautionWarning) SetVCLighting(vcidx, IntegralLights_CW_Lights, MAT_LIGHT, 0, NUM_ELEMENTS(IntegralLights_CW_Lights));
+
+		for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++)
+		{
+			if ((replicatedCautionWarning && (replicatedLightBits & (UINT64_C(1) << i))) || (!replicatedCautionWarning && ((LightStates[i] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT)))
+			{
+				if (replicatedCautionWarning || cws.GetSource() != CWS_SOURCE_CM) {
 					CW_Lights.push_back(IntegralLights_CW_Lights[i]);
-			}
-		}
-		else {
-			for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++) {
-				if ((LightStates[i] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT) {
-					if (cws.GetSource() != CWS_SOURCE_CM)
-						CW_Lights.push_back(IntegralLights_CW_Lights[i]);
-					else
-						CW_Lights.push_back(IntegralLights_CW_Lights_CM[i]);
+				}
+				else
+				{
+					CW_Lights.push_back(IntegralLights_CW_Lights_CM[i]);
 				}
 			}
+		 }
 
-			for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++) {
-				if ((LightStates[i + 30] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT) {
-					if (cws.GetSource() != CWS_SOURCE_CM)
-						CW_Lights.push_back(IntegralLights_CW_Lights[i + 30]);
-					else
-						CW_Lights.push_back(IntegralLights_CW_Lights_CM[i + 30]);
+		for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++)
+		{
+			if ((replicatedCautionWarning && (replicatedLightBits & (UINT64_C(1) << (i + 30)))) || (!replicatedCautionWarning && ((LightStates[i+30] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT)))
+			{
+				if (replicatedCautionWarning || cws.GetSource() != CWS_SOURCE_CM) {
+					CW_Lights.push_back(IntegralLights_CW_Lights[i + 30]);
+				}
+				else
+				{
+					CW_Lights.push_back(IntegralLights_CW_Lights_CM[i+30]);
 				}
 			}
-		}
+		 }
+
 		if (CW_Lights.size() > 0) SetVCLighting(vcidx, &CW_Lights[0], MAT_LIGHT, 1, CW_Lights.size()); 	//Caution & Warning Lights
-		if (DSKY_Lights.size() > 0) SetVCLighting(vcidx, &DSKY_Lights[0], MAT_LIGHT, LeftNumericLights.Variable_115_5VAC_Output.Voltage(), DSKY_Lights.size());
-		if (DSKY_LEB_Lights.size() > 0) SetVCLighting(vcidx, &DSKY_LEB_Lights[0], MAT_LIGHT, LEBNumericLights.Variable_115_5VAC_Output.Voltage(), DSKY_LEB_Lights.size());
+		if (DSKY_Lights.size() > 0) SetVCLighting(vcidx, &DSKY_Lights[0], MAT_LIGHT, dsky.GetDisplayedStatusBrightness(), DSKY_Lights.size());
+		if (DSKY_LEB_Lights.size() > 0) SetVCLighting(vcidx, &DSKY_LEB_Lights[0], MAT_LIGHT, dsky2.GetDisplayedStatusBrightness(), DSKY_LEB_Lights.size());
 
 /*
 		// LEB Conditional Lamps
@@ -2162,32 +2165,11 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 		}
 */
 		// LEB Conditional Lamps
-		if (IsMultiplayerReplica()) {
-			// High presentation bits carry the authority-computed LEB condition lamps.
-			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 0.0, 1);
-			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, 0.0, 1);
-			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 0.0, 1);
-			const std::uint64_t lightBits = cws.GetDisplayedLightBits();
-			if (lightBits & (UINT64_C(1) << 60))
-				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 1.0, 1);
-			if (lightBits & (UINT64_C(1) << 61))
-				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, 1.0, 1);
-			if (lightBits & (UINT64_C(1) << 62))
-				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 1.0, 1);
-		}
-		else if (cws.IsPowered() && cws.GetGNLampState() != 0) {
-			if (cws.GetGNLampState() == 2 || cws.GetGNPGNSAlarm()) {
-				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 1.0, 1);
-			}
+		const std::uint64_t lightBits = cws.GetDisplayedLightBits();
+		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, (lightBits & (UINT64_C(1) << 60)) ? 1.0 : 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, (lightBits & (UINT64_C(1) << 61)) ? 1.0 : 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, (lightBits & (UINT64_C(1) << 62)) ? 1.0 : 0.0, 1);
 
-			if (cws.GetGNLampState() == 2 || LightStates[CSM_CWS_CMC_LIGHT + 30 - CWS_LIGHTS_PER_PANEL]) {
-				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, 1.0, 1);
-			}
-
-			if (cws.GetGNLampState() == 2 || LightStates[CSM_CWS_ISS_LIGHT + 30 - CWS_LIGHTS_PER_PANEL]) {
-				SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 1.0, 1);
-			}
-		}
 		/////////////////////
 		// Full Lit Lights //
 		/////////////////////
@@ -2203,23 +2185,19 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 		}
 
 		if (IsMultiplayerReplica()) {
-			// Replica master-alarm materials are driven only by the authority's visible-state bits.
 			SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 0.0, 1);
 			SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 0.0, 1);
 			SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 0.0, 1);
 			const int masterAlarmBits = cws.GetDisplayedMasterAlarmBits();
-			if (masterAlarmBits & 1)
-				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
-			if (masterAlarmBits & 2)
-				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
-			if (masterAlarmBits & 4)
-				SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 1.0, 1);
+			if (masterAlarmBits & 1) SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
+			if (masterAlarmBits & 2) SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
+			if (masterAlarmBits & 4) SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 1.0, 1);
 		}
 		else if (cws.IsPowered()) {
 			if ((cws.GetMasterAlarm() || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT) && cws.GetMode() != CWS_MODE_BOOST) {
 				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
 			}
-
+		
 			if (cws.GetMasterAlarm() || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT) {
 				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
 			}

@@ -84,8 +84,10 @@ class PanelSwitchScenarioHandler;
 class PanelSwitchCallbackInterface;
 
 // Classifies the single logical value exposed by a panel item to the generic panel provider.
-enum class PanelReplicationValueType { DiscreteInput, ContinuousInput, IndicatorPresentation,
-	MeterPresentation, Excluded };
+enum class PanelReplicationValueType
+{
+	DiscreteInput, ContinuousInput, IndicatorPresentation, MeterPresentation, Excluded
+};
 
 using PanelReplicationValue = std::uint64_t;
 
@@ -294,20 +296,27 @@ public:
 	virtual void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose);
 
 	///
-	/// \brief Clear values that only apply while this item is a replica.
+	/// \brief Enable or disable authority-owned presentation for this item.
+	/// \param active True while the owning vessel is a replica.
 	///
-	virtual void ClearReplicationPresentation();
+	virtual void SetReplicationPresentationActive(bool active);
 
 	///
 	/// \brief Use the given revision counter to report value changes.
-	/// \param revision Revision counter to update, or NULL to stop tracking changes.
+	/// \param revision Revision counter to update, or NULL to stop tracking
+	/// changes.
 	///
-	void TrackReplicationRevision(Revision *revision) { replicationRevision = revision; }
+	void TrackReplicationRevision(Revision *revision) {
+		replicationRevision = revision;
+	}
 
 	///
 	/// \brief Report that this item's replication value changed.
 	///
-	void NotifyReplicationValueChanged() { if (replicationRevision) ++*replicationRevision; }
+	void NotifyReplicationValueChanged() {
+		if (replicationRevision)
+			++*replicationRevision;
+	}
 
 	///
 	/// \brief Check the power state.
@@ -1109,12 +1118,17 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	int GetGuardState() { return guardState; };
-	void SetGuardState(bool s) { if (guardState != s) { guardState = s; NotifyReplicationValueChanged(); } };
+	void SetGuardState(bool s) {
+		if ((guardState != 0) != s) {
+			guardState = s;
+			NotifyReplicationValueChanged();
+		}
+	};
 	bool CaptureReplicationValue(PanelReplicationValue &value) override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
-	void Unguard() { guardState = 1; };
+	void Unguard() { SetGuardState(true); };
 	void Guard();
 
 	void DefineVCAnimations(UINT vc_idx);
@@ -1245,12 +1259,17 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	int GetGuardState() { return guardState; };
-	void SetGuardState(bool s) { if (guardState != s) { guardState = s; NotifyReplicationValueChanged(); } };
+	void SetGuardState(bool s) {
+		if ((guardState != 0) != s) {
+			guardState = s;
+			NotifyReplicationValueChanged();
+		}
+	};
 	bool CaptureReplicationValue(PanelReplicationValue &value) override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
-	void Unguard() { guardState = 1; };
+	void Unguard() { SetGuardState(true); };
 	void Guard();
 
 	void SetLit(bool l) { lit = l; };
@@ -1299,12 +1318,17 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(char *line);
 	int GetGuardState() { return guardState; };
-	void SetGuardState(bool s) { if (guardState != s) { guardState = s; NotifyReplicationValueChanged(); } };
+	void SetGuardState(bool s) {
+		if ((guardState != 0) != s) {
+			guardState = s;
+			NotifyReplicationValueChanged();
+		}
+	};
 	bool CaptureReplicationValue(PanelReplicationValue &value) override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
-	void Unguard() { guardState = 1; };
+	void Unguard() { SetGuardState(true); };
 	void Guard();
 
 	void DefineVCAnimations(UINT vc_idx);
@@ -1561,24 +1585,24 @@ public:
 	virtual int GetState() { return state; };
 	virtual void SetState(int s) { state = s; };
 	int GetDisplayState() const { return (int)displayState; };
-	// Sets the talkback state shown by a replica.
-	void SetReplicatedDisplayState(int state) { replicatedDisplayState = state; };
-	void ClearReplicatedDisplayState() { replicatedDisplayState = -1; };
 	PanelReplicationValueType GetReplicationValueType() const override;
 	bool CaptureReplicationValue(PanelReplicationValue &value) override;
 	unsigned int ReplicationStateBitCount() const override { return 2; }
 	std::uint32_t MaximumReplicationState() const override { return 3; }
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
-	void ClearReplicationPresentation() override;
+	void SetReplicationPresentationActive(bool active) override;
 
 //	int operator=(const int b) { state = b; return state; };
 //	operator int() {return state; };
 
 protected:
+	int QueryTargetState();
+
 	int state; // Changed to INT for extended capabilities hackery
 	double displayState;	//0: false, 1: moving, 2: moving, 3: true
 	bool failOpen;
-	int replicatedDisplayState; // Negative means the normal locally calculated display state is used.
+	bool replicatedPresentationActive;
+	int replicatedTargetState;
 	int	x;
 	int y;
 	int width;
@@ -1604,14 +1628,11 @@ public:
 	void LoadState(char *line);
 	double GetDisplayValue();
 	double GetCurrentDisplayValue() const { return displayValue; };
-	// Sets the meter value shown by a replica.
-	void SetReplicatedDisplayValue(double value) { replicatedDisplayValue = value; hasReplicatedDisplayValue = true; };
-	void ClearReplicatedDisplayValue() { hasReplicatedDisplayValue = false; };
 	PanelReplicationValueType GetReplicationValueType() const override;
 	bool CaptureReplicationValue(PanelReplicationValue &value) override;
 	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
-	void ClearReplicationPresentation() override;
+	void SetReplicationPresentationActive(bool active) override;
 
 	virtual double QueryValue() = 0;
 	virtual void DoDrawSwitch(double v, SURFHANDLE drawSurface) = 0;
@@ -1631,7 +1652,7 @@ protected:
 	SwitchRow *switchRow;
 	double lastDrawTime;
 	double replicatedDisplayValue;
-	bool hasReplicatedDisplayValue; // Selects the authority value instead of querying local systems. That's a workaround since we don't have the role available here yet.
+	bool replicatedPresentationActive;
 
 	VESSEL *OurVessel;
 

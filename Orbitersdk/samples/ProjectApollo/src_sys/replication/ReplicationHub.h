@@ -8,7 +8,7 @@ class ReplicationHub
 {
 public:
 	enum class RegistrationResult
-	{
+{
 		// The provider was retained and the catalog was rebuilt.
 		Success,
 		// The entity already has a provider with the same component key.
@@ -50,13 +50,11 @@ public:
 	void SetRole(ReplicationRole role);
 
 	// Routes a capture request after confirming that both compact IDs are known.
-	ProviderResult CaptureGroup(ComponentId componentId, ReplicationGroupId groupId,
-		ReplicationWriter &writer, const CaptureContext &context) const;
+	ProviderResult CaptureGroup(ComponentId componentId, ReplicationGroupId groupId, ReplicationWriter &writer, const CaptureContext &context) const;
 	// Returns an optional provider revision for centrally scheduled group capture.
 	bool TryGetGroupRevision(ComponentId componentId, ReplicationGroupId groupId, Revision &revision) const;
 	// Validates every item without modifying any provider state.
-	ProviderResult ValidateBatch(const std::vector<ApplyItem> &items,
-		const ApplyContext &context) const;
+	ProviderResult ValidateBatch(const std::vector<ApplyItem> &items, const ApplyContext &context) const;
 	// Applies a batch only when the preceding validation accepted every item.
 	ProviderResult ApplyBatch(const std::vector<ApplyItem> &items, const ApplyContext &context);
 

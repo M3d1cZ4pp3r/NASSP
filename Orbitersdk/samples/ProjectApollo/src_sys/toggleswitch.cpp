@@ -150,51 +150,48 @@ bool PanelSwitchItem::WriteReplicationValue(ReplicationWriter &writer)
 		return false;
 
 	const PanelReplicationValueType type = GetReplicationValueType();
-	if (type == PanelReplicationValueType::DiscreteInput ||
-		type == PanelReplicationValueType::IndicatorPresentation) {
+	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation) {
 		const std::uint32_t stateValue = static_cast<std::uint32_t>(value & PanelReplicationStateMask);
-		if (!writer.WriteValue(stateValue, ReplicationStateBitCount()))
+		if (!writer.WriteScalar(stateValue, ReplicationStateBitCount()))
 			return false;
 		if (ReplicatesHeldState()) {
-			if (!writer.WriteValue((value & PanelReplicationHeld) != 0))
+			if (!writer.WriteScalar((value & PanelReplicationHeld) != 0))
 				return false;
 		}
 		if (ReplicatesGuardState()) {
-			if (!writer.WriteValue((value & PanelReplicationGuard) != 0))
+			if (!writer.WriteScalar((value & PanelReplicationGuard) != 0))
 				return false;
 		}
 		return true;
 	}
-	return writer.WriteValue(value);
+	return writer.WriteScalar(value);
 }
 
-bool PanelSwitchItem::ReadReplicationValue(const ReplicationReader &reader,
-	PanelReplicationValue &value) const
+bool PanelSwitchItem::ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const
 {
 	const PanelReplicationValueType type = GetReplicationValueType();
-	if (type == PanelReplicationValueType::DiscreteInput ||
-		type == PanelReplicationValueType::IndicatorPresentation) {
+	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation) {
 		std::uint32_t stateValue = 0;
-		if (!reader.ReadValue(stateValue, ReplicationStateBitCount()))
+		if (!reader.ReadScalar(stateValue, ReplicationStateBitCount()))
 			return false;
 
 		value = stateValue;
 		bool flag = false;
 		if (ReplicatesHeldState()) {
-			if (!reader.ReadValue(flag))
+			if (!reader.ReadScalar(flag))
 				return false;
 			if (flag)
 				value |= PanelReplicationHeld;
 		}
 		if (ReplicatesGuardState()) {
-			if (!reader.ReadValue(flag))
+			if (!reader.ReadScalar(flag))
 				return false;
 			if (flag)
 				value |= PanelReplicationGuard;
 		}
 		return true;
 	}
-	return reader.ReadValue(value);
+	return reader.ReadScalar(value);
 }
 
 unsigned int PanelSwitchItem::ReplicationStateBitCount() const
@@ -215,10 +212,8 @@ bool PanelSwitchItem::ReplicatesGuardState() const
 unsigned int PanelSwitchItem::MaximumReplicationBits() const
 {
 	const PanelReplicationValueType type = GetReplicationValueType();
-	if (type == PanelReplicationValueType::DiscreteInput ||
-		type == PanelReplicationValueType::IndicatorPresentation)
-		return ReplicationStateBitCount() + (ReplicatesHeldState() ? 1 : 0) +
-			(ReplicatesGuardState() ? 1 : 0);
+	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation)
+		return ReplicationStateBitCount() + (ReplicatesHeldState() ? 1 : 0) + (ReplicatesGuardState() ? 1 : 0);
 	if (type == PanelReplicationValueType::Excluded)
 		return 0;
 	return sizeof(PanelReplicationValue) * 8;
@@ -236,8 +231,7 @@ bool PanelSwitchItem::ValidateReplicationValue(std::uint64_t valueBits) const
 		allowedBits |= PanelReplicationHeld;
 	if (ReplicatesGuardState())
 		allowedBits |= PanelReplicationGuard;
-	return (valueBits & ~allowedBits) == 0 &&
-		(valueBits & PanelReplicationStateMask) <= MaximumReplicationState();
+	return (valueBits & ~allowedBits) == 0 && (valueBits & PanelReplicationStateMask) <= MaximumReplicationState();
 }
 
 void PanelSwitchItem::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
@@ -249,7 +243,7 @@ void PanelSwitchItem::ApplyReplicationValue(PanelReplicationValue valueBits, App
 		ApplyRemoteInput(value);
 }
 
-void PanelSwitchItem::ClearReplicationPresentation()
+void PanelSwitchItem::SetReplicationPresentationActive(bool)
 {
 }
 
@@ -489,10 +483,8 @@ bool TwoPositionSwitch::DoCheckMouseClick(int event, int mx, int my) {
 		}
 	}
 	else if (IsSpringLoaded() && ((event & PANEL_MOUSE_LBUP) != 0) && !IsHeld()) {
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
-			SwitchTo(TOGGLESWITCH_DOWN);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)
-			SwitchTo(TOGGLESWITCH_UP);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(TOGGLESWITCH_DOWN);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(TOGGLESWITCH_UP);
 	}
 	return true;
 }
@@ -840,12 +832,9 @@ bool ThreePosSwitch::CheckMouseClick(int event, int mx, int my) {
 
 	}
 	else if (IsSpringLoaded() && ((event & PANEL_MOUSE_LBUP) != 0) && !IsHeld()) {		
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
-			SwitchTo(THREEPOSSWITCH_DOWN, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
-			SwitchTo(THREEPOSSWITCH_CENTER, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)
-			SwitchTo(THREEPOSSWITCH_UP, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(THREEPOSSWITCH_DOWN, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_CENTER) SwitchTo(THREEPOSSWITCH_CENTER, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(THREEPOSSWITCH_UP, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP && state == THREEPOSSWITCH_UP)     
 			SwitchTo(THREEPOSSWITCH_CENTER, true);
@@ -1004,12 +993,9 @@ bool FivePosSwitch::CheckMouseClick(int event, int mx, int my) {
 			Sclick.play();
 		}
 	} else if (IsSpringLoaded() && event == PANEL_MOUSE_LBUP && !IsHeld()) {		
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
-			SwitchTo(FIVEPOSSWITCH_DOWN, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
-			SwitchTo(FIVEPOSSWITCH_CENTER, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)
-			SwitchTo(FIVEPOSSWITCH_UP, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(FIVEPOSSWITCH_DOWN, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_CENTER) SwitchTo(FIVEPOSSWITCH_CENTER, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(FIVEPOSSWITCH_UP, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP && state == FIVEPOSSWITCH_UP)     
 			SwitchTo(FIVEPOSSWITCH_CENTER, true);
@@ -1076,12 +1062,9 @@ bool FivePosSwitch::CheckMouseClickVC(int event, VECTOR3 &p) {
 		}
 	}
 	else if (IsSpringLoaded() && event == PANEL_MOUSE_LBUP && !IsHeld()) {
-		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)
-			SwitchTo(FIVEPOSSWITCH_DOWN, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_CENTER)
-			SwitchTo(FIVEPOSSWITCH_CENTER, true);
-		if (springLoaded == SPRINGLOADEDSWITCH_UP)
-			SwitchTo(FIVEPOSSWITCH_UP, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_DOWN)   SwitchTo(FIVEPOSSWITCH_DOWN, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_CENTER) SwitchTo(FIVEPOSSWITCH_CENTER, true);
+		if (springLoaded == SPRINGLOADEDSWITCH_UP)     SwitchTo(FIVEPOSSWITCH_UP, true);
 
 		if (springLoaded == SPRINGLOADEDSWITCH_CENTER_SPRINGUP && state == FIVEPOSSWITCH_UP)
 			SwitchTo(FIVEPOSSWITCH_CENTER, true);
@@ -2118,7 +2101,7 @@ void GuardedToggleSwitch::DrawFlash(SURFHANDLE DrawSurface)
 void GuardedToggleSwitch::Guard() {
 
 	if (guardState) {
-		guardState = 0;
+		SetGuardState(false);
 
 		// reset by guard
 		if (guardResetsState) { 
@@ -2146,7 +2129,7 @@ bool GuardedToggleSwitch::CheckMouseClick(int event, int mx, int my) {
 				Guard();
 			} 
 			else {
-				guardState = 1;
+				Unguard();
 			}
 			guardClick.play();
 			return true;
@@ -2380,7 +2363,7 @@ void GuardedPushSwitch::DrawFlash(SURFHANDLE DrawSurface)
 void GuardedPushSwitch::Guard() {
 			
 	if (guardState) {
-		guardState = 0;
+		SetGuardState(false);
 		if (Active && state && guardResetsState)
 			SwitchTo(0,true);
 	}
@@ -2398,7 +2381,7 @@ bool GuardedPushSwitch::CheckMouseClick(int event, int mx, int my)
 				Guard();
 			}
 			else {
-				guardState = 1;
+				Unguard();
 			}
 			guardClick.play();
 			return true;
@@ -2420,7 +2403,7 @@ bool GuardedPushSwitch::CheckMouseClickVC(int event, VECTOR3 &p) {
 			Guard();
 		}
 		else {
-			guardState = 1;
+			Unguard();
 		}
 		guardClick.play();
 		return true;
@@ -2580,7 +2563,7 @@ void GuardedThreePosSwitch::DrawSwitchVC(int id, int event, SURFHANDLE surf) {
 void GuardedThreePosSwitch::Guard() {
 
 	if (guardState) {
-		guardState = 0;
+		SetGuardState(false);
 		// reset by guard
 		if (guardResetsState) { 
 			if (Active && state) {
@@ -2612,7 +2595,7 @@ bool GuardedThreePosSwitch::CheckMouseClick(int event, int mx, int my) {
 			if (guardState) {
 				Guard();
 			} else {
-				guardState = 1;
+				Unguard();
 			}
 			guardClick.play();
 			return true;
@@ -2689,9 +2672,9 @@ ContinuousSwitch::~ContinuousSwitch()
 
 void ContinuousSwitch::Register(PanelSwitchScenarioHandler &scnh, char *n, double defaultVal, double minVal, double maxVal)
 {
-	//defaultValue: default display value (e.g. 0°)
-	//minValue: minimum displayed value (e.g. -4°)
-	//maxValue: maximum displayed value (e.g. +4°)
+	//defaultValue: default display value (e.g. 0ï¿½)
+	//minValue: minimum displayed value (e.g. -4ï¿½)
+	//maxValue: maximum displayed value (e.g. +4ï¿½)
 	//maxState: maximum number of bitmap positions
 
 	minValue = minVal;
@@ -2776,18 +2759,18 @@ PanelReplicationValueType IndicatorSwitch::GetReplicationValueType() const
 
 bool IndicatorSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
 {
-	valueBits = static_cast<PanelReplicationValue>(GetDisplayState());
+	valueBits = static_cast<PanelReplicationValue>(QueryTargetState());
 	return true;
 }
 
 void IndicatorSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose)
 {
-	SetReplicatedDisplayState(static_cast<int>(valueBits & PanelReplicationStateMask));
+	replicatedTargetState = static_cast<int>(valueBits & PanelReplicationStateMask);
 }
 
-void IndicatorSwitch::ClearReplicationPresentation()
+void IndicatorSwitch::SetReplicationPresentationActive(bool active)
 {
-	ClearReplicatedDisplayState();
+	replicatedPresentationActive = active;
 }
 
 PanelReplicationValueType MeterSwitch::GetReplicationValueType() const
@@ -2813,12 +2796,12 @@ void MeterSwitch::ApplyReplicationValue(std::uint64_t valueBits, ApplyPurpose)
 {
 	double value = 0;
 	std::memcpy(&value, &valueBits, sizeof(value));
-	SetReplicatedDisplayValue(value);
+	replicatedDisplayValue = value;
 }
 
-void MeterSwitch::ClearReplicationPresentation()
+void MeterSwitch::SetReplicationPresentationActive(bool active)
 {
-	ClearReplicatedDisplayValue();
+	replicatedPresentationActive = active;
 }
 
 double ContinuousSwitch::GetOutput()
@@ -3156,7 +3139,7 @@ void ContinuousRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface)
 	{
 		srcx -= maxState;
 	}
-	//Default bitmap has alternating 15° positions up and down
+	//Default bitmap has alternating 15ï¿½ positions up and down
 	int srcx2, srcy;
 	if (maxState > 12)
 	{
@@ -3754,7 +3737,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 
 		switch (rotstate)
 		{
-		case 0: //-120°
+		case 0: //-120ï¿½
 			rt.left = 29 + x;
 			rt.top = 24 + y;
 			rt.right = 60 + x;
@@ -3762,7 +3745,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(44 + x, 28 + y, label, strlen(label));
 			break;
-		case 1: //-90°
+		case 1: //-90ï¿½
 			rt.left = 35 + x;
 			rt.top = 30 + y;
 			rt.right = 59 + x;
@@ -3770,7 +3753,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(49 + x, 31 + y, label, strlen(label));
 			break;
-		case 2: //-60°
+		case 2: //-60ï¿½
 			rt.left = 32 + x;
 			rt.top = 29 + y;
 			rt.right = 63 + x;
@@ -3778,7 +3761,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(47 + x, 34 + y, label, strlen(label));
 			break;
-		case 3: //-30°
+		case 3: //-30ï¿½
 			rt.left = 29 + x;
 			rt.top = 29 + y;
 			rt.right = 60 + x;
@@ -3786,7 +3769,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(44 + x, 34 + y, label, strlen(label));
 			break;
-		case 4: //0°
+		case 4: //0ï¿½
 			rt.left = 29 + x;
 			rt.top = 35 + y;
 			rt.right = 57 + x;
@@ -3794,8 +3777,8 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(42 + x, 36 + y, label, strlen(label));
 			break;
-		case 5: //30°
-		case 6: //60°
+		case 5: //30ï¿½
+		case 6: //60ï¿½
 			rt.left = 28 + x;
 			rt.top = 30 + y;
 			rt.right = 54 + x;
@@ -3803,11 +3786,11 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(37 + x, 34 + y, label, strlen(label));
 			break;
-		case 7: //90°
+		case 7: //90ï¿½
 			skp->Text(32 + x, 31 + y, label, strlen(label));
 			break;
-		case 8: //120°
-		case 9: //150°
+		case 8: //120ï¿½
+		case 9: //150ï¿½
 			rt.left = 25 + x;
 			rt.top = 24 + y;
 			rt.right = 55 + x;
@@ -4126,7 +4109,8 @@ IndicatorSwitch::IndicatorSwitch() {
 	switchSurface = 0;
 	switchRow = 0;
 	SRC = NULL;
-	replicatedDisplayState = -1;
+	replicatedPresentationActive = false;
+	replicatedTargetState = 0;
 
 }
 
@@ -4164,30 +4148,8 @@ bool IndicatorSwitch::CheckMouseClick(int event, int mx, int my) {
 }
 
 void IndicatorSwitch::DrawSwitch(SURFHANDLE drawSurface) {
-	if (replicatedDisplayState >= 0) {
-		displayState = replicatedDisplayState;
-		oapiBlt(drawSurface, switchSurface, x, y, width * replicatedDisplayState, 0, width, height);
-		return;
-	}
 
-	int drawState=0;
-	if (switchRow) {
-		if (switchRow->panelSwitches->listener) 
-			switchRow->panelSwitches->listener->PanelIndicatorSwitchStateRequested(this);
-	}
-	if (callback)
-		callback->call(this);
-
-	// Require power if wired
-	if (SRC != NULL) {
-		if (SRC->Voltage() > SP_MIN_DCVOLTAGE) {
-			drawState = GetState();
-		} else {
-			drawState = (failOpen ? 1 : 0);
-		}
-	} else {
-		drawState = GetState();
-	}
+	const int drawState = replicatedPresentationActive ? replicatedTargetState : QueryTargetState();
 
 	if (drawState && displayState < 3.0)
 		displayState += oapiGetSimStep() * 4.0;
@@ -4212,33 +4174,8 @@ void IndicatorSwitch::InitVC(SURFHANDLE surf)
 }
 
 void IndicatorSwitch::DrawSwitchVC(int id, int event, SURFHANDLE drawSurface) {
-	if (replicatedDisplayState >= 0) {
-		displayState = replicatedDisplayState;
-		oapiBlt(drawSurface, switchsurfacevc, x*TexMul, y*TexMul,
-			width * replicatedDisplayState*TexMul, 0, width*TexMul, height*TexMul);
-		return;
-	}
 
-	int drawState = 0;
-	if (switchRow) {
-		if (switchRow->panelSwitches->listener)
-			switchRow->panelSwitches->listener->PanelIndicatorSwitchStateRequested(this);
-	}
-	if (callback)
-		callback->call(this);
-
-	// Require power if wired
-	if (SRC != NULL) {
-		if (SRC->Voltage() > SP_MIN_DCVOLTAGE) {
-			drawState = GetState();
-		}
-		else {
-			drawState = (failOpen ? 1 : 0);
-		}
-	}
-	else {
-		drawState = GetState();
-	}
+	const int drawState = replicatedPresentationActive ? replicatedTargetState : QueryTargetState();
 
 	if (drawState && displayState < 3.0)
 		displayState += oapiGetSimStep() * 64.0;
@@ -4255,6 +4192,29 @@ void IndicatorSwitch::DrawSwitchVC(int id, int event, SURFHANDLE drawSurface) {
 	}
 
 	oapiBlt(drawSurface, switchsurfacevc, x*TexMul, y*TexMul, width * (int)displayState*TexMul, 0, width*TexMul, height*TexMul);
+}
+
+int IndicatorSwitch::QueryTargetState()
+{
+	if (switchRow) {
+		if (switchRow->panelSwitches->listener)
+			switchRow->panelSwitches->listener->PanelIndicatorSwitchStateRequested(this);
+	}
+	if (callback)
+		callback->call(this);
+
+	// Require power if wired
+	if (SRC != NULL) {
+		if (SRC->Voltage() > SP_MIN_DCVOLTAGE) {
+			return GetState();
+		}
+		else {
+			return (failOpen ? 1 : 0);
+		}
+	}
+	else {
+		return GetState();
+	}
 }
 
 void IndicatorSwitch::SaveState(FILEHANDLE scn) {
@@ -4296,7 +4256,7 @@ MeterSwitch::MeterSwitch() {
 	switchRow = 0;
 	lastDrawTime = -1;
 	replicatedDisplayValue = 0;
-	hasReplicatedDisplayValue = false;
+	replicatedPresentationActive = false;
 
 	grpIndex = 0;
 	anim_switch = 0;
@@ -4346,7 +4306,7 @@ void MeterSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 }
 
 double MeterSwitch::GetDisplayValue() {
-	if (hasReplicatedDisplayValue)
+	if (replicatedPresentationActive)
 		return replicatedDisplayValue;
 
 	// Prevent problems if the simulation is started paused and 
@@ -6208,7 +6168,7 @@ void VCPointingArrow::Timestep(int PointingArrowidx, DEVMESHHANDLE hArrowMesh, c
 	}
 
 	if (!oapiGetPause()) {
-		rotationangle += oapiGetSimStep() / oapiGetTimeAcceleration() * -90;  // Rotate 360° every 4 Second
+		rotationangle += oapiGetSimStep() / oapiGetTimeAcceleration() * -90;  // Rotate 360ï¿½ every 4 Second
 		if (rotationangle > 360) rotationangle = 0;
 		rad = rotationangle * PI / 180.0;
 		cos_a = std::cos(rad);

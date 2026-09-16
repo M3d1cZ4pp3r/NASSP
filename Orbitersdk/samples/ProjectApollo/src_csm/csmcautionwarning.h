@@ -104,8 +104,7 @@ public:
 	/// \param context Information about the capture request.
 	/// \return Success if the requested state was written.
 	///
-	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer,
-		const CaptureContext &context) override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
 
 	///
 	/// \brief Check whether received C&W data can be applied.
@@ -114,8 +113,7 @@ public:
 	/// \param context Information about the apply request.
 	/// \return Success if the received state can be applied.
 	///
-	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader,
-		const ApplyContext &context) const override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
 
 	///
 	/// \brief Apply validated C&W data.
@@ -240,8 +238,7 @@ protected:
 	/// \param sdy Y offset for light bitmaps in the panel image surface.
 	/// \param base Light number base for this panel.
 	///
-	void RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf, int sdx, int sdy, int base,
-		int xTexMul = 1);
+	void RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf, int sdx, int sdy, int base, int xTexMul = 1);
 
 	///
 	/// Check the fuel cell status to determine whether it's in a 'bad' state that we

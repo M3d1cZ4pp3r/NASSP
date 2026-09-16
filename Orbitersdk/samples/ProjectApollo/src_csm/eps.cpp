@@ -220,6 +220,8 @@ FloodLights::FloodLights()
 	FIXEDsw = NULL;
 	DIMsw = NULL;
 	Rotary = NULL;
+	replicatedPresentationActive = false;
+	replicatedOutput = 0.0;
 }
 
 FloodLights::~FloodLights()
@@ -275,6 +277,11 @@ double FloodLights::GetSecOutput() //Provides scaling for VC lighting and power 
 double FloodLights::GetCombinedOutput() //Provides scaling for VC lighting until two sources are created
 {
 	return (GetPrimOutput() + GetSecOutput()) * 1.5;
+}
+
+double FloodLights::GetDisplayedOutput()
+{
+	return replicatedPresentationActive ? replicatedOutput : GetCombinedOutput();
 }
 
 void FloodLights::SystemTimestep(double simdt) ///TBD: Generate Heat
@@ -342,6 +349,8 @@ IntegralLights::IntegralLights(PanelSDK& p, double watts) :
 	Integralcb = NULL;
 	Rotary = NULL;
 	powerdraw = watts;
+	replicatedPresentationActive = false;
+	replicatedOutput = 0.0;
 
 	p.AddElectrical(&Variable_0_115VAC_Int_Output, false);
 }
@@ -367,6 +376,11 @@ double IntegralLights::GetOutput() //Provides scaling for VC lighting and power 
 	return Variable_0_115VAC_Int_Output.Voltage() / 115.0;
 }
 
+double IntegralLights::GetDisplayedOutput()
+{
+	return replicatedPresentationActive ? replicatedOutput : GetOutput();
+}
+
 void IntegralLights::SystemTimestep(double simdt)
 {
 	Integralcb->DrawPower(GetOutput() * powerdraw);
@@ -380,6 +394,8 @@ NumericLights::NumericLights(PanelSDK& p) :
 	saturn = NULL;
 	Numericscb = NULL;
 	Rotary = NULL;
+	replicatedPresentationActive = false;
+	replicatedOutput = 0.0;
 
 	p.AddElectrical(&Variable_115_5VAC_Output, false);
 	p.AddElectrical(&Variable_0_115VAC_Num_Output, false);
@@ -408,6 +424,11 @@ void NumericLights::Init(Saturn *s, e_object *cb, ContinuousRotationalSwitch *rt
 double NumericLights::GetOutput() //Provides scaling for VC lighting and power draw
 {
 	return (Variable_0_115VAC_Num_Output.Voltage() / 115.0); //returns bus voltage scaled by rotary position (0-1)
+}
+
+double NumericLights::GetDisplayedOutput()
+{
+	return replicatedPresentationActive ? replicatedOutput : GetOutput();
 }
 
 void NumericLights::SystemTimestep(double simdt)

@@ -58,7 +58,7 @@ class ReplicationCatalog
 {
 public:
 	enum class BuildResult
-	{
+{
 		// Every provider declaration was valid and has been published.
 		Success,
 		// A provider cannot be addressed without a stable component key.

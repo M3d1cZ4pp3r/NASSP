@@ -64,6 +64,9 @@ public:
 	double GetPrimOutput();
 	double GetSecOutput();
 	double GetCombinedOutput();
+	double GetDisplayedOutput();
+	void SetReplicatedOutput(double output) { replicatedOutput = output; }
+	void SetReplicationPresentationActive(bool active) { replicatedPresentationActive = active; }
 	void SystemTimestep(double simdt);
 
 protected:
@@ -72,6 +75,8 @@ protected:
 	e_object *FIXEDsw;
 	ToggleSwitch *DIMsw;
 	ContinuousRotationalSwitch *Rotary;
+	bool replicatedPresentationActive;
+	double replicatedOutput;
 };
 
 /// This class simulates tunnel lighting behavior in the CSM
@@ -98,6 +103,9 @@ public:
 	virtual ~IntegralLights();
 	void IntegralLights::Init(Saturn *s, e_object *cb, ContinuousRotationalSwitch *rty);
 	double GetOutput();
+	double GetDisplayedOutput();
+	void SetReplicatedOutput(double output) { replicatedOutput = output; }
+	void SetReplicationPresentationActive(bool active) { replicatedPresentationActive = active; }
 	void SystemTimestep(double simdt);
 
 	// Variable 0-115VAC integral transformer
@@ -108,6 +116,8 @@ protected:
 	e_object *Integralcb;
 	ContinuousRotationalSwitch *Rotary;
 	double powerdraw;
+	bool replicatedPresentationActive;
+	double replicatedOutput;
 };
 
 /// This class simulates numeric lighting behavior in the CSM
@@ -118,6 +128,9 @@ public:
 	virtual ~NumericLights();
 	void NumericLights::Init(Saturn *s, e_object *cb, ContinuousRotationalSwitch *rty);
 	double GetOutput();
+	double GetDisplayedOutput();
+	void SetReplicatedOutput(double output) { replicatedOutput = output; }
+	void SetReplicationPresentationActive(bool active) { replicatedPresentationActive = active; }
 	void SystemTimestep(double simdt);
 
 	// Variable 115-5VAC output to DSKY
@@ -130,6 +143,8 @@ protected:
 	Saturn *saturn;
 	e_object *Numericscb;
 	ContinuousRotationalSwitch *Rotary;
+	bool replicatedPresentationActive;
+	double replicatedOutput;
 };
 
 /// This class simulates exterior lighting behavior in the CSM

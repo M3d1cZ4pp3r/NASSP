@@ -74,8 +74,7 @@ ReplicationHub::RegistrationResult ReplicationHub::RebuildCatalog()
 			}
 		}
 	}
-	return routedProviders.size() == catalog.Components().size() ? RegistrationResult::Success :
-		RegistrationResult::CatalogFailure;
+	return routedProviders.size() == catalog.Components().size() ? RegistrationResult::Success : RegistrationResult::CatalogFailure;
 }
 
 const ReplicationCatalog &ReplicationHub::Catalog() const
@@ -99,8 +98,7 @@ void ReplicationHub::SetRole(ReplicationRole newRole)
 		provider->OnRoleChanged(role);
 }
 
-ProviderResult ReplicationHub::CaptureGroup(ComponentId componentId, ReplicationGroupId groupId,
-	ReplicationWriter &writer, const CaptureContext &context) const
+ProviderResult ReplicationHub::CaptureGroup(ComponentId componentId, ReplicationGroupId groupId, ReplicationWriter &writer, const CaptureContext &context) const
 {
 	IReplicationProvider *provider = FindProvider(componentId);
 	const std::vector<ReplicationCatalogComponent> &components = catalog.Components();
@@ -111,8 +109,7 @@ ProviderResult ReplicationHub::CaptureGroup(ComponentId componentId, Replication
 	return provider->Capture(component.groups[groupId].key.c_str(), writer, context);
 }
 
-bool ReplicationHub::TryGetGroupRevision(ComponentId componentId, ReplicationGroupId groupId,
-	Revision &revision) const
+bool ReplicationHub::TryGetGroupRevision(ComponentId componentId, ReplicationGroupId groupId, Revision &revision) const
 {
 	IReplicationProvider *provider = FindProvider(componentId);
 	const std::vector<ReplicationCatalogComponent> &components = catalog.Components();
@@ -123,16 +120,13 @@ bool ReplicationHub::TryGetGroupRevision(ComponentId componentId, ReplicationGro
 	return provider->TryGetRevision(component.groups[groupId].key.c_str(), revision);
 }
 
-ProviderResult ReplicationHub::ValidateBatch(const std::vector<ApplyItem> &items,
-	const ApplyContext &context) const
+ProviderResult ReplicationHub::ValidateBatch(const std::vector<ApplyItem> &items, const ApplyContext &context) const
 {
 	std::set<std::pair<ComponentId, ReplicationGroupId>> routes;
 	const std::vector<ReplicationCatalogComponent> &components = catalog.Components();
 	for (const ApplyItem &item : items) {
 		IReplicationProvider *provider = FindProvider(item.componentId);
-		if (!provider || item.componentId >= components.size() ||
-			item.groupId >= components[item.componentId].groups.size() ||
-			(!item.payload && item.payloadSize))
+		if (!provider || item.componentId >= components.size() || item.groupId >= components[item.componentId].groups.size() || (!item.payload && item.payloadSize))
 			return ProviderResult::Malformed;
 		const std::pair<ComponentId, ReplicationGroupId> route(item.componentId, item.groupId);
 		const bool routeInserted = routes.insert(route).second;
@@ -142,8 +136,7 @@ ProviderResult ReplicationHub::ValidateBatch(const std::vector<ApplyItem> &items
 		// Validate first so no earlier provider can leave a partial snapshot behind.
 		ReplicationReader reader(item.payload, item.payloadSize);
 		const ReplicationCatalogComponent &component = components[item.componentId];
-		const ProviderResult validation = provider->Validate(component.groups[item.groupId].key.c_str(),
-			reader, context);
+		const ProviderResult validation = provider->Validate(component.groups[item.groupId].key.c_str(), reader, context);
 		if (validation != ProviderResult::Success)
 			return validation;
 	}
@@ -151,8 +144,7 @@ ProviderResult ReplicationHub::ValidateBatch(const std::vector<ApplyItem> &items
 	return ProviderResult::Success;
 }
 
-ProviderResult ReplicationHub::ApplyBatch(const std::vector<ApplyItem> &items,
-	const ApplyContext &context)
+ProviderResult ReplicationHub::ApplyBatch(const std::vector<ApplyItem> &items, const ApplyContext &context)
 {
 	const ProviderResult validation = ValidateBatch(items, context);
 	if (validation != ProviderResult::Success)

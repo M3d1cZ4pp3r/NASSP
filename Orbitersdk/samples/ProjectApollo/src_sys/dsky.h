@@ -35,13 +35,14 @@
 
 #include "toggleswitch.h"
 #include "apolloguidance.h"
+#include "replication/IReplicationProvider.h"
 
-class DSKY : public e_object
+class DSKY : public e_object, public IReplicationProvider
 
 {
 public:
 
-	DSKY(SoundLib &s, ApolloGuidance &computer, PanelSDK& p, int IOChannel = 015);
+	DSKY(SoundLib &s, ApolloGuidance &computer, PanelSDK& p, int IOChannel, const char *instanceKey);
 	virtual ~DSKY();
 
 	void Init(
@@ -167,6 +168,15 @@ public:
 
 	bool GetStatusLtPower();
 	bool GetDSKYPower();
+	double GetDisplayedStatusBrightness();
+	double GetDisplayedSegmentBrightness();
+
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	void SaveState(FILEHANDLE scn, char *start_str, char *end_str);
 	void LoadState(FILEHANDLE scn, char *end_str);
@@ -291,6 +301,12 @@ protected:
 	Sound Sclick;
 
 	bool FirstTimeStep;
+	bool replicatedPresentationActive;
+	const char *replicationInstanceKey;
+	bool replicatedSegmentPowered;
+	bool replicatedDSKYPowered;
+	float replicatedStatusBrightness;
+	float replicatedSegmentBrightness;
 	e_object *StatusPower;
 	e_object *SegmentPower;
 	ContinuousRotationalSwitch *DimmerRotationalSwitch;
@@ -314,6 +330,7 @@ protected:
 	char ValueChar(unsigned val);
 	void KeyClick();
 	void ResetKeyDown();
+	ProviderResult ReadReplication(const ReplicationReader &reader, DSKY *target) const;
 
 	void DSKYLightBlt(SURFHANDLE surf, SURFHANDLE lights, int dstx, int dsty, bool lit, int xOffset, int yOffset, int xTexMul);
 	void DSKYKeyBlt(SURFHANDLE surf, SURFHANDLE keys, int dstx, int dsty, int srcx, int srcy, bool lit, int xOffset, int yOffset); 

@@ -2,15 +2,9 @@
 
 #include <cstring>
 
-ReplicationWriter::ReplicationWriter(void *buffer, std::size_t capacity) :
-	buffer(static_cast<std::uint8_t *>(buffer)),
-	capacity(capacity),
-	bitOffset(0),
-	flushed(false)
-{
-}
+ReplicationWriter::ReplicationWriter(void *buffer, std::size_t capacity) : buffer(static_cast<std::uint8_t *>(buffer)), capacity(capacity), bitOffset(0), flushed(false) {}
 
-bool ReplicationWriter::Write(const void *data, std::size_t dataSize)
+bool ReplicationWriter::WriteBytes(const void *data, std::size_t dataSize)
 {
 	if (!data && dataSize)
 		return false;
@@ -27,18 +21,18 @@ bool ReplicationWriter::Write(const void *data, std::size_t dataSize)
 	return true;
 }
 
-bool ReplicationWriter::WriteValue(float value)
+bool ReplicationWriter::WriteScalar(float value)
 {
 	std::uint32_t bits = 0;
 	std::memcpy(&bits, &value, sizeof(bits));
-	return WriteValue(bits);
+	return WriteScalar(bits);
 }
 
-bool ReplicationWriter::WriteValue(double value)
+bool ReplicationWriter::WriteScalar(double value)
 {
 	std::uint64_t bits = 0;
 	std::memcpy(&bits, &value, sizeof(bits));
-	return WriteValue(bits);
+	return WriteScalar(bits);
 }
 
 bool ReplicationWriter::WriteBits(std::uint64_t value, unsigned int bitCount)
@@ -85,14 +79,9 @@ std::size_t ReplicationWriter::Capacity() const
 	return capacity;
 }
 
-ReplicationReader::ReplicationReader(const void *buffer, std::size_t size) :
-	buffer(static_cast<const std::uint8_t *>(buffer)),
-	size(size),
-	bitOffset(0)
-{
-}
+ReplicationReader::ReplicationReader(const void *buffer, std::size_t size) : buffer(static_cast<const std::uint8_t *>(buffer)), size(size), bitOffset(0) {}
 
-bool ReplicationReader::Read(void *destination, std::size_t destinationSize) const
+bool ReplicationReader::ReadBytes(void *destination, std::size_t destinationSize) const
 {
 	if (!destination && destinationSize)
 		return false;
@@ -111,20 +100,20 @@ bool ReplicationReader::Read(void *destination, std::size_t destinationSize) con
 	return true;
 }
 
-bool ReplicationReader::ReadValue(float &value) const
+bool ReplicationReader::ReadScalar(float &value) const
 {
 	std::uint32_t bits = 0;
-	const bool bitsRead = ReadValue(bits);
+	const bool bitsRead = ReadScalar(bits);
 	if (!bitsRead)
 		return false;
 	std::memcpy(&value, &bits, sizeof(value));
 	return true;
 }
 
-bool ReplicationReader::ReadValue(double &value) const
+bool ReplicationReader::ReadScalar(double &value) const
 {
 	std::uint64_t bits = 0;
-	const bool bitsRead = ReadValue(bits);
+	const bool bitsRead = ReadScalar(bits);
 	if (!bitsRead)
 		return false;
 	std::memcpy(&value, &bits, sizeof(value));

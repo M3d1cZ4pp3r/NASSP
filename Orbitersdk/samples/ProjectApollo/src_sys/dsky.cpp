@@ -148,12 +148,48 @@
 
 #include "nasspdefs.h"
 
+#include <climits>
+#include <cmath>
+
 static char TwoSpace[] = "  ";
 static char SixSpace[] = "      ";
 
 static int SegmentCount[] = {6, 2, 5, 5, 4, 5, 6, 3, 7, 5 };
 
-DSKY::DSKY(SoundLib &s, ApolloGuidance &computer, PanelSDK& p, int IOChannel) : soundlib(s), agc(computer),
+namespace
+{
+const char *DSKYPresentationGroupKey = "presentation";
+const double DSKYStatusPowerThreshold = 1.8;
+
+enum DSKYLightBit
+{
+	DSKYLightCompActy = 0,
+	DSKYLightUplink,
+	DSKYLightNoAtt,
+	DSKYLightStby,
+	DSKYLightKbRel,
+	DSKYLightOprErr,
+	DSKYLightTemp,
+	DSKYLightGimbalLock,
+	DSKYLightProg,
+	DSKYLightRestart,
+	DSKYLightTracker,
+	DSKYLightVel,
+	DSKYLightAlt,
+	DSKYLightPrioDisp,
+	DSKYLightNoDAP
+};
+
+const unsigned int DSKYLightBitCount = DSKYLightNoDAP + 1;
+const unsigned int DSKYFlagBitCount = 5;
+
+bool IsDSKYCharacter(char value)
+{
+	return value == ' ' || value == '+' || value == '-' || (value >= '0' && value <= '9');
+}
+} // namespace
+
+DSKY::DSKY(SoundLib &s, ApolloGuidance &computer, PanelSDK& p, int IOChannel, const char *instanceKey) : soundlib(s), agc(computer),
 Variable_250VAC_Output("Variable 250VAC DSKY Transformer", 0.0, 250.0, true)
 
 {
@@ -161,6 +197,12 @@ Variable_250VAC_Output("Variable 250VAC DSKY Transformer", 0.0, 250.0, true)
 	IntegralPower = NULL;
 	StatusPower = NULL;
 	SegmentPower = NULL;
+	replicatedPresentationActive = false;
+	replicationInstanceKey = instanceKey;
+	replicatedSegmentPowered = false;
+	replicatedDSKYPowered = false;
+	replicatedStatusBrightness = 0.0f;
+	replicatedSegmentBrightness = 0.0f;
 	Reset();
 	ResetKeyDown();
 	KeyCodeIOChannel = IOChannel;
@@ -233,7 +275,7 @@ void DSKY::Init(
 }
 
 bool DSKY::IsStatusPowered() {
-	if (StatusPower->Voltage() < 1.8) { return false; }
+	if (StatusPower->Voltage() < DSKYStatusPowerThreshold) { return false; }
 
 	return true;
 }
@@ -385,7 +427,8 @@ void DSKY::KeyClick()
 void DSKY::SendKeyCode(int val)
 
 {
-	agc.SetInputChannel(KeyCodeIOChannel, val);
+	if (!replicatedPresentationActive)
+		agc.SetInputChannel(KeyCodeIOChannel, val);
 }
 
 void DSKY::KeyRel()
@@ -444,13 +487,15 @@ void DSKY::ProceedPressed()
 {
 	KeyClick();
 
-	agc.SetInputChannelBit(032, Proceed, true);
+	if (!replicatedPresentationActive)
+		agc.SetInputChannelBit(032, Proceed, true);
 }
 
 void DSKY::ProceedReleased()
 
 {
-	agc.SetInputChannelBit(032, Proceed, false);
+	if (!replicatedPresentationActive)
+		agc.SetInputChannelBit(032, Proceed, false);
 }
 
 void DSKY::ResetPressed()
@@ -836,7 +881,7 @@ void DSKY::RenderData(SURFHANDLE surf, SURFHANDLE digits, SURFHANDLE disp, int x
 	xOffset *= TexMul;
 	yOffset *= TexMul;
 
-	if (!IsSegmentPowered() || ELOff)
+	if (!(replicatedPresentationActive ? replicatedSegmentPowered : IsSegmentPowered()) || ELOff)
 		return;
 
 	oapiBlt(surf, disp, 66*TexMul + xOffset,   3*TexMul + yOffset, 35*TexMul,  0, 35*TexMul, 10*TexMul, SURF_PREDEF_CK);
@@ -1571,11 +1616,14 @@ void DSKY::SendNetworkPacketDSKY()
 
 bool DSKY::GetStatusLtPower()
 {
-	return IsStatusPowered();
+	return replicatedPresentationActive ? replicatedStatusBrightness >= DSKYStatusPowerThreshold : IsStatusPowered();
 }
 
 bool DSKY::GetDSKYPower()
 {
+	if (replicatedPresentationActive)
+		return replicatedDSKYPowered;
+
 	if (SegmentPower->Voltage() > SP_MIN_DCVOLTAGE)
 	{
 		return true;
@@ -1584,4 +1632,188 @@ bool DSKY::GetDSKYPower()
 	{
 		return false;
 	}
+}
+
+double DSKY::GetDisplayedStatusBrightness()
+{
+	return replicatedPresentationActive ? replicatedStatusBrightness : StatusPower->Voltage();
+}
+
+double DSKY::GetDisplayedSegmentBrightness()
+{
+	return replicatedPresentationActive ? replicatedSegmentBrightness : Variable_250VAC_Output.Voltage() / 250.0;
+}
+
+const char *DSKY::ComponentKey() const
+{
+	return replicationInstanceKey;
+}
+
+ProviderResult DSKY::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	ReplicationSchemaBuilder schema;
+	schema.AddString("lights");
+	schema.AddUint32(DSKYLightBitCount);
+	schema.AddString("prog");
+	schema.AddUint32((sizeof(Prog) - 1) * CHAR_BIT);
+	schema.AddString("verb");
+	schema.AddUint32((sizeof(Verb) - 1) * CHAR_BIT);
+	schema.AddString("noun");
+	schema.AddUint32((sizeof(Noun) - 1) * CHAR_BIT);
+	schema.AddString("r1");
+	schema.AddUint32((sizeof(R1) - 1) * CHAR_BIT);
+	schema.AddString("r2");
+	schema.AddUint32((sizeof(R2) - 1) * CHAR_BIT);
+	schema.AddString("r3");
+	schema.AddUint32((sizeof(R3) - 1) * CHAR_BIT);
+	schema.AddString("flags");
+	schema.AddUint32(DSKYFlagBitCount);
+	schema.AddString("status_brightness");
+	schema.AddUint32(sizeof(float) * CHAR_BIT);
+	schema.AddString("segment_brightness");
+	schema.AddUint32(sizeof(float) * CHAR_BIT);
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = DSKYPresentationGroupKey;
+	presentation.schemaId = schema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 33;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = 35;
+	catalog.AddGroup(presentation);
+	return ProviderResult::Success;
+}
+
+ProviderResult DSKY::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &)
+{
+	if (strcmp(groupKey, DSKYPresentationGroupKey) != 0)
+		return ProviderResult::Unsupported;
+
+	const std::uint16_t lights =
+		(CompActy ? 1U << DSKYLightCompActy : 0U) |
+		(UplinkLight ? 1U << DSKYLightUplink : 0U) |
+		(NoAttLight ? 1U << DSKYLightNoAtt : 0U) |
+		(StbyLight ? 1U << DSKYLightStby : 0U) |
+		(KbRelLight ? 1U << DSKYLightKbRel : 0U) |
+		(OprErrLight ? 1U << DSKYLightOprErr : 0U) |
+		(TempLight ? 1U << DSKYLightTemp : 0U) |
+		(GimbalLockLight ? 1U << DSKYLightGimbalLock : 0U) |
+		(ProgLight ? 1U << DSKYLightProg : 0U) |
+		(RestartLight ? 1U << DSKYLightRestart : 0U) |
+		(TrackerLight ? 1U << DSKYLightTracker : 0U) |
+		(VelLight ? 1U << DSKYLightVel : 0U) |
+		(AltLight ? 1U << DSKYLightAlt : 0U) |
+		(PrioDispLight ? 1U << DSKYLightPrioDisp : 0U) |
+		(NoDAPLight ? 1U << DSKYLightNoDAP : 0U);
+	const std::uint8_t flags =
+		(VerbFlashing ? 1U : 0U) |
+		(NounFlashing ? 1U << 1 : 0U) |
+		(ELOff ? 1U << 2 : 0U) |
+		(IsSegmentPowered() ? 1U << 3 : 0U) |
+		(GetDSKYPower() ? 1U << 4 : 0U);
+	char characters[24];
+	memcpy(characters, Prog, 2);
+	memcpy(characters + 2, Verb, 2);
+	memcpy(characters + 4, Noun, 2);
+	memcpy(characters + 6, R1, 6);
+	memcpy(characters + 12, R2, 6);
+	memcpy(characters + 18, R3, 6);
+
+	if (!writer.WriteScalar(lights, DSKYLightBitCount))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteBytes(characters, sizeof(characters)))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteScalar(flags, DSKYFlagBitCount))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteScalar(static_cast<float>(GetDisplayedStatusBrightness())))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteScalar(static_cast<float>(GetDisplayedSegmentBrightness())))
+		return ProviderResult::BufferTooSmall;
+	return ProviderResult::Success;
+}
+
+ProviderResult DSKY::ReadReplication(const ReplicationReader &reader, DSKY *target) const
+{
+	std::uint16_t lights;
+	std::uint8_t flags;
+	char characters[24];
+	float statusBrightness;
+	float segmentBrightness;
+
+	if (!reader.ReadScalar(lights, DSKYLightBitCount))
+		return ProviderResult::Malformed;
+	if (!reader.ReadBytes(characters, sizeof(characters)))
+		return ProviderResult::Malformed;
+	if (!reader.ReadScalar(flags, DSKYFlagBitCount))
+		return ProviderResult::Malformed;
+	if (!reader.ReadScalar(statusBrightness))
+		return ProviderResult::Malformed;
+	if (!reader.ReadScalar(segmentBrightness))
+		return ProviderResult::Malformed;
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+
+	for (unsigned int i = 0; i < sizeof(characters); i++) {
+		if (!IsDSKYCharacter(characters[i]))
+			return ProviderResult::Rejected;
+	}
+	if (!std::isfinite(statusBrightness) || statusBrightness < 0.0f || statusBrightness > 10.0f)
+		return ProviderResult::Rejected;
+	if (!std::isfinite(segmentBrightness) || segmentBrightness < 0.0f || segmentBrightness > 2.0f)
+		return ProviderResult::Rejected;
+
+	if (target) {
+		target->CompActy = (lights & (1U << DSKYLightCompActy)) != 0;
+		target->UplinkLight = (lights & (1U << DSKYLightUplink)) != 0;
+		target->NoAttLight = (lights & (1U << DSKYLightNoAtt)) != 0;
+		target->StbyLight = (lights & (1U << DSKYLightStby)) != 0;
+		target->KbRelLight = (lights & (1U << DSKYLightKbRel)) != 0;
+		target->OprErrLight = (lights & (1U << DSKYLightOprErr)) != 0;
+		target->TempLight = (lights & (1U << DSKYLightTemp)) != 0;
+		target->GimbalLockLight = (lights & (1U << DSKYLightGimbalLock)) != 0;
+		target->ProgLight = (lights & (1U << DSKYLightProg)) != 0;
+		target->RestartLight = (lights & (1U << DSKYLightRestart)) != 0;
+		target->TrackerLight = (lights & (1U << DSKYLightTracker)) != 0;
+		target->VelLight = (lights & (1U << DSKYLightVel)) != 0;
+		target->AltLight = (lights & (1U << DSKYLightAlt)) != 0;
+		target->PrioDispLight = (lights & (1U << DSKYLightPrioDisp)) != 0;
+		target->NoDAPLight = (lights & (1U << DSKYLightNoDAP)) != 0;
+		memcpy(target->Prog, characters, 2);
+		memcpy(target->Verb, characters + 2, 2);
+		memcpy(target->Noun, characters + 4, 2);
+		memcpy(target->R1, characters + 6, 6);
+		memcpy(target->R2, characters + 12, 6);
+		memcpy(target->R3, characters + 18, 6);
+		target->Prog[2] = '\0';
+		target->Verb[2] = '\0';
+		target->Noun[2] = '\0';
+		target->R1[6] = '\0';
+		target->R2[6] = '\0';
+		target->R3[6] = '\0';
+		target->VerbFlashing = (flags & (1U << 0)) != 0;
+		target->NounFlashing = (flags & (1U << 1)) != 0;
+		target->ELOff = (flags & (1U << 2)) != 0;
+		target->replicatedSegmentPowered = (flags & (1U << 3)) != 0;
+		target->replicatedDSKYPowered = (flags & (1U << 4)) != 0;
+		target->replicatedStatusBrightness = statusBrightness;
+		target->replicatedSegmentBrightness = segmentBrightness;
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult DSKY::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
+{
+	if (strcmp(groupKey, DSKYPresentationGroupKey) != 0 || context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+	return ReadReplication(reader, NULL);
+}
+
+void DSKY::Apply(const char *, const ReplicationReader &reader, const ApplyContext &)
+{
+	ReadReplication(reader, this);
+}
+
+void DSKY::OnRoleChanged(ReplicationRole role)
+{
+	replicatedPresentationActive = role == ReplicationRole::Replica;
 }

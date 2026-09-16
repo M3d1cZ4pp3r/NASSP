@@ -61,25 +61,24 @@ struct CautionWarningPresentation
 
 ProviderResult ReadMasterAlarmInput(const ReplicationReader &reader, bool &pressed)
 {
-	const bool read = reader.ReadValue(pressed);
+	const bool read = reader.ReadScalar(pressed);
 	const bool payloadComplete = reader.Finish();
 	return read && payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
 }
 
-ProviderResult ReadCautionWarningPresentation(const ReplicationReader &reader,
-	CautionWarningPresentation &presentation)
+ProviderResult ReadCautionWarningPresentation(const ReplicationReader &reader, CautionWarningPresentation &presentation)
 {
-	const bool lightsRead = reader.ReadValue(presentation.lights, CautionWarningLightBitCount);
+	const bool lightsRead = reader.ReadScalar(presentation.lights, CautionWarningLightBitCount);
 	if (!lightsRead)
 		return ProviderResult::Malformed;
 
-	const bool masterAlarmRead = reader.ReadValue(presentation.masterAlarm, MasterAlarmBitCount);
+	const bool masterAlarmRead = reader.ReadScalar(presentation.masterAlarm, MasterAlarmBitCount);
 	const bool payloadComplete = reader.Finish();
 	return masterAlarmRead && payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
 }
 }
 
-CSMCautionWarningSystem::CSMCautionWarningSystem(Sound &mastersound, Sound &buttonsound, PanelSDK &p) :
+CSMCautionWarningSystem::CSMCautionWarningSystem(Sound &mastersound, Sound &buttonsound, PanelSDK &p) : 
 	CautionWarningSystem(mastersound, buttonsound, p)
 
 {
@@ -473,7 +472,7 @@ void CSMCautionWarningSystem::TimeStep(double simt)
 		sat->GetDisplayedAtmosStatus(datm);
 
 		//
-		// Glycol temperature of the EcsRadTempPrimOutletMeter lower than -30°F
+		// Glycol temperature of the EcsRadTempPrimOutletMeter lower than -30ï¿½F
 		// Use displayed value instead of the PanelSDK to make use of the "damping" 
 		// of the SuitComprDeltaPMeter to pervent alarms because of the fluctuations during 
 		// high time acceleration.
@@ -776,8 +775,7 @@ bool CSMCautionWarningSystem::LightPowered(int i)
 	return true;
 }
 
-void CSMCautionWarningSystem::RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf,
-	int sdx, int sdy, int base, int TexMul)
+void CSMCautionWarningSystem::RenderLightPanel(SURFHANDLE surf, SURFHANDLE lightsurf, int sdx, int sdy, int base, int TexMul)
 
 {
 	const std::uint64_t displayedLights = GetDisplayedLightBits();
@@ -828,30 +826,28 @@ ProviderResult CSMCautionWarningSystem::Describe(ReplicationCatalogBuilder &cata
 	return ProviderResult::Success;
 }
 
-ProviderResult CSMCautionWarningSystem::Capture(const char *groupKey, ReplicationWriter &writer,
-	const CaptureContext &context)
+ProviderResult CSMCautionWarningSystem::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context)
 {
 	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
 		const bool pressed = IsMasterAlarmPressed();
-		const bool written = writer.WriteValue(pressed);
+		const bool written = writer.WriteScalar(pressed);
 		return written ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 	}
 
 	if (std::strcmp(groupKey, "visible_lights") == 0) {
 		const std::uint64_t lights = GetDisplayedLightBits();
 		const std::uint8_t masterAlarm = static_cast<std::uint8_t>(GetDisplayedMasterAlarmBits());
-		const bool lightsWritten = writer.WriteValue(lights, CautionWarningLightBitCount);
+		const bool lightsWritten = writer.WriteScalar(lights, CautionWarningLightBitCount);
 		if (!lightsWritten)
 			return ProviderResult::BufferTooSmall;
-		const bool masterAlarmWritten = writer.WriteValue(masterAlarm, MasterAlarmBitCount);
+		const bool masterAlarmWritten = writer.WriteScalar(masterAlarm, MasterAlarmBitCount);
 		return masterAlarmWritten ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 	}
 
 	return ProviderResult::Unsupported;
 }
 
-ProviderResult CSMCautionWarningSystem::Validate(const char *groupKey, const ReplicationReader &reader,
-	const ApplyContext &context) const
+ProviderResult CSMCautionWarningSystem::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
 {
 	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
 		bool pressed = false;
@@ -865,8 +861,7 @@ ProviderResult CSMCautionWarningSystem::Validate(const char *groupKey, const Rep
 	return ReadCautionWarningPresentation(reader, presentation);
 }
 
-void CSMCautionWarningSystem::Apply(const char *groupKey, const ReplicationReader &reader,
-	const ApplyContext &context)
+void CSMCautionWarningSystem::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
 {
 	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
 		bool pressed = false;
@@ -906,8 +901,7 @@ std::uint64_t CSMCautionWarningSystem::GetDisplayedLightBits()
 			const bool left = light < CWS_LIGHTS_PER_PANEL;
 			const bool tested = TestState == (left ? CWS_TEST_LIGHTS_LEFT : CWS_TEST_LIGHTS_RIGHT);
 			const bool state = left ? LeftLights[light] : RightLights[light - CWS_LIGHTS_PER_PANEL];
-			if ((tested || (state && (Mode != CWS_MODE_ACK || MasterAlarmPressed))) &&
-				!IsFailed(light) && LightPowered(light)) {
+			if ((tested || (state && (Mode != CWS_MODE_ACK || MasterAlarmPressed))) && !IsFailed(light) && LightPowered(light)) {
 				bits |= UINT64_C(1) << light;
 			}
 		}

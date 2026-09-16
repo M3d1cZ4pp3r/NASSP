@@ -76,19 +76,12 @@ public:
 	// Appends opaque bytes at the current bit position.
 	bool Write(const void *data, std::size_t size);
 
-	// Serializes an integral value with its native width in canonical least-significant-bit-first order.
-	template<class T>
-	typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type
-		WriteValue(T value)
-	{
-		return WriteValue(value, static_cast<unsigned int>(sizeof(T) * 8));
-	}
+	// Serializes an integral value with its native width in canonical
+	// least-significant-bit-first order.
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type WriteScalar(T value) { return WriteScalar(value, static_cast<unsigned int>(sizeof(T) * 8)); }
 
 	// Serializes only the requested low bits after verifying that the value fits.
-	template<class T>
-	typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type
-		WriteValue(T value,
-		unsigned int bitCount)
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type WriteScalar(T value, unsigned int bitCount)
 	{
 		if (!bitCount || bitCount > sizeof(T) * 8)
 			return false;
@@ -101,15 +94,14 @@ public:
 				if (signedValue < minimum || signedValue > maximum)
 					return false;
 			}
-		}
-		else if (bitCount < 64 && static_cast<std::uint64_t>(value) >= (std::uint64_t(1) << bitCount)) {
+		} else if (bitCount < 64 && static_cast<std::uint64_t>(value) >= (std::uint64_t(1) << bitCount)) {
 			return false;
 		}
 
 		typedef typename std::make_unsigned<T>::type UnsignedType;
 		return WriteBits(static_cast<std::uint64_t>(static_cast<UnsignedType>(value)), bitCount);
 	}
-	bool WriteValue(bool value) { return WriteValue(static_cast<std::uint8_t>(value ? 1 : 0), 1); }
+	bool WriteScalar(bool value) { return WriteScalar(static_cast<std::uint8_t>(value ? 1 : 0), 1); }
 
 	// Serializes floating-point values without changing their IEEE representation.
 	bool WriteValue(float value);
@@ -142,21 +134,14 @@ public:
 	ReplicationReader(const void *buffer, std::size_t size);
 
 	// Copies opaque bytes from the current bit position.
-	bool Read(void *destination, std::size_t size) const;
+	bool ReadBytes(void *destination, std::size_t size) const;
 
 	// Deserializes an integral value written with its native width.
-	template<class T>
-	typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type
-		ReadValue(T &value) const
-	{
-		return ReadValue(value, static_cast<unsigned int>(sizeof(T) * 8));
-	}
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type ReadScalar(T &value) const { return ReadScalar(value, static_cast<unsigned int>(sizeof(T) * 8)); }
 
-	// Deserializes a compact integral field and restores signed two's-complement values.
-	template<class T>
-	typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type
-		ReadValue(T &value,
-		unsigned int bitCount) const
+	// Deserializes a compact integral field and restores signed two's-complement
+	// values.
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type ReadScalar(T &value, unsigned int bitCount) const
 	{
 		if (!bitCount || bitCount > sizeof(T) * 8)
 			return false;
@@ -167,25 +152,25 @@ public:
 
 		typedef typename std::make_unsigned<T>::type UnsignedType;
 		UnsignedType converted = static_cast<UnsignedType>(decoded);
-		if (std::is_signed<T>::value && bitCount < sizeof(T) * 8 &&
-			(decoded & (std::uint64_t(1) << (bitCount - 1)))) {
+		if (std::is_signed<T>::value && bitCount < sizeof(T) * 8 && (decoded & (std::uint64_t(1) << (bitCount - 1)))) {
 			converted |= static_cast<UnsignedType>(~UnsignedType(0) << bitCount);
 		}
 		value = static_cast<T>(converted);
 		return true;
 	}
-	bool ReadValue(bool &value) const
+	bool ReadScalar(bool &value) const
 	{
 		std::uint8_t encoded = 0;
-		if (!ReadValue(encoded, 1))
+		if (!ReadScalar(encoded, 1))
 			return false;
 		value = encoded != 0;
 		return true;
 	}
 
-	// Deserializes floating-point values without changing their IEEE representation.
-	bool ReadValue(float &value) const;
-	bool ReadValue(double &value) const;
+	// Deserializes floating-point values without changing their IEEE
+	// representation.
+	bool ReadScalar(float &value) const;
+	bool ReadScalar(double &value) const;
 
 	// Accepts only an exactly consumed payload with zero-valued final padding bits.
 	bool Finish() const;

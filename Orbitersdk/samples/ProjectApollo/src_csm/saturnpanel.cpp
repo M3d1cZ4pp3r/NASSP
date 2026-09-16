@@ -4035,7 +4035,7 @@ void Saturn::PanelIndicatorSwitchStateRequested(IndicatorSwitch *s) {
 	} else if (s == &FuelCellRadTempIndicator) {
 		FuelCellStatus fc;
 		GetFuelCellStatus(FuelCellIndicatorsSwitch.GetState() + 1, fc);
-		if (fc.CoolingTempF < -30.0 || stage > CSM_LEM_STAGE)	// indication if temperature below -30Â°F
+		if (fc.CoolingTempF < -30.0 || stage > CSM_LEM_STAGE)	// indication if temperature below -30°F
 			FuelCellRadTempIndicator.SetState(0);
 		else
 			FuelCellRadTempIndicator.SetState(1);

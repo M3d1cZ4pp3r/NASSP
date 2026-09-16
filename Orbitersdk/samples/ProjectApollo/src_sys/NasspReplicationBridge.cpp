@@ -103,8 +103,7 @@ void NasspReplicationBridge::ReadCatalog(ReplicationHub &hub, void *context)
 		return;
 	}
 
-	api::ReplicationGroupDescriptor *output =
-		static_cast<api::ReplicationGroupDescriptor *>(request->items.output);
+	api::ReplicationGroupDescriptor *output = static_cast<api::ReplicationGroupDescriptor *>(request->items.output);
 	std::uint32_t outputIndex = 0;
 	for (const ReplicationCatalogComponent &component : components) {
 		for (const ReplicationCatalogGroup &group : component.groups) {
@@ -128,8 +127,7 @@ void NasspReplicationBridge::ReadCatalog(ReplicationHub &hub, void *context)
 void NasspReplicationBridge::SetRole(ReplicationHub &hub, void *context)
 {
 	api::Request *request = static_cast<api::Request *>(context);
-	if (request->role != api::ReplicationRole::Standalone && request->role != api::ReplicationRole::Authority &&
-		request->role != api::ReplicationRole::Replica) {
+	if (request->role != api::ReplicationRole::Standalone && request->role != api::ReplicationRole::Authority && request->role != api::ReplicationRole::Replica) {
 		request->result = api::Result::InvalidRequest;
 		return;
 	}
@@ -151,8 +149,7 @@ void NasspReplicationBridge::GetGroupRevision(ReplicationHub &hub, void *context
 		return;
 	}
 	const std::vector<ReplicationCatalogComponent> &components = hub.Catalog().Components();
-	if (request->componentId >= components.size() ||
-		request->groupId >= components[request->componentId].groups.size()) {
+	if (request->componentId >= components.size() || request->groupId >= components[request->componentId].groups.size()) {
 		request->result = api::Result::UnknownGroup;
 		return;
 	}
@@ -183,8 +180,7 @@ void NasspReplicationBridge::CaptureGroup(ReplicationHub &hub, void *context)
 	CaptureContext captureContext;
 	captureContext.simulationTick = request->serverTick;
 	captureContext.isBaseline = request->captureIsBaseline != 0;
-	const ProviderResult capture = hub.CaptureGroup(request->componentId, request->groupId, writer,
-		captureContext);
+	const ProviderResult capture = hub.CaptureGroup(request->componentId, request->groupId, writer, captureContext);
 	if (capture == ProviderResult::Success)
 		writer.Flush();
 	request->payloadSize = static_cast<std::uint32_t>(writer.Size());
@@ -216,8 +212,7 @@ void NasspReplicationBridge::ApplyBatch(ReplicationHub &hub, void *context)
 	const std::uint8_t *payload = static_cast<const std::uint8_t *>(request->payload.input);
 	for (std::uint32_t index = 0; index < request->itemCount; index++) {
 		const api::ApplyItem &inputItem = input[index];
-		if (inputItem.payloadOffset > request->payloadSize ||
-			inputItem.payloadSize > request->payloadSize - inputItem.payloadOffset) {
+		if (inputItem.payloadOffset > request->payloadSize || inputItem.payloadSize > request->payloadSize - inputItem.payloadOffset) {
 			request->result = api::Result::MalformedPayload;
 			return;
 		}

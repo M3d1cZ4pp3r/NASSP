@@ -3969,6 +3969,7 @@ protected:
 	SIVBSystems *sivb;
 	CSMCautionWarningSystem cws;
 	PanelControlProvider panelControlProvider;
+	CsmLightingProvider lightingProvider;
 
 	DockingProbe dockingprobe;
 	SECS secs;
