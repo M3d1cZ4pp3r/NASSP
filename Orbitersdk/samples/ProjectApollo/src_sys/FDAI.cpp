@@ -38,6 +38,7 @@
 namespace
 {
 const char FDAIPresentationGroupKey[] = "presentation";
+const unsigned int FDAIPowerBitCount = 1;
 }
 
 FDAI::FDAI(const char *instanceKey) : replicationInstanceKey(instanceKey) {
@@ -218,7 +219,7 @@ ProviderResult FDAI::Describe(ReplicationCatalogBuilder &catalog) const
 {
 	ReplicationSchemaBuilder schema;
 	schema.AddString("powered");
-	schema.AddUint32(1);
+	schema.AddUint32(FDAIPowerBitCount);
 
 	ReplicationGroupDescriptor presentation;
 	presentation.key = FDAIPresentationGroupKey;
@@ -226,7 +227,7 @@ ProviderResult FDAI::Describe(ReplicationCatalogBuilder &catalog) const
 	presentation.delivery = ReplicationDelivery::Unreliable;
 	presentation.periodicIntervalMs = 33;
 	presentation.replicateChanges = false;
-	presentation.maximumPayloadBytes = sizeof(std::uint8_t);
+	presentation.maximumPayloadBytes = (FDAIPowerBitCount + 7) / 8;
 	catalog.AddGroup(presentation);
 	return ProviderResult::Success;
 }
@@ -236,18 +237,17 @@ ProviderResult FDAI::Capture(const char *groupKey, ReplicationWriter &writer, co
 	if (strcmp(groupKey, FDAIPresentationGroupKey) != 0)
 		return ProviderResult::Unsupported;
 
-	if (!writer.WriteScalar(IsPowered()))
-		return ProviderResult::BufferTooSmall;
-	return ProviderResult::Success;
+	writer.WriteScalar(IsPowered());
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 }
 
 ProviderResult FDAI::ReadReplication(const ReplicationReader &reader, FDAI *destination) const
 {
 	ReplicatedPresentation presentation;
 
-	if (!reader.ReadScalar(presentation.powered))
-		return ProviderResult::Malformed;
-	if (!reader.Finish())
+	reader.ReadScalar(presentation.powered);
+	const bool payloadComplete = reader.Finish();
+	if (!payloadComplete)
 		return ProviderResult::Malformed;
 
 	if (destination) {

@@ -73,39 +73,51 @@ public:
 	// Writes a provider payload bit by bit into a buffer supplied by the caller.
 	ReplicationWriter(void *buffer, std::size_t capacity);
 
-	// Appends opaque bytes at the current bit position.
-	bool WriteBytes(const void *data, std::size_t size);
+	// Appends opaque bytes and retains a failure for the rest of the chain.
+	ReplicationWriter &WriteBytes(const void *data, std::size_t size);
 
 	// Serializes an integral value with its native width in canonical
 	// least-significant-bit-first order.
-	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type WriteScalar(T value) { return WriteScalar(value, static_cast<unsigned int>(sizeof(T) * 8)); }
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, ReplicationWriter &>::type WriteScalar(T value) { return WriteScalar(value, static_cast<unsigned int>(sizeof(T) * 8)); }
 
 	// Serializes only the requested low bits after verifying that the value fits.
-	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type WriteScalar(T value, unsigned int bitCount)
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, ReplicationWriter &>::type WriteScalar(T value, unsigned int bitCount)
 	{
-		if (!bitCount || bitCount > sizeof(T) * 8)
-			return false;
+		if (failed)
+			return *this;
+		if (!bitCount || bitCount > sizeof(T) * 8) {
+			failed = true;
+			return *this;
+		}
 
 		if (std::is_signed<T>::value) {
 			const std::int64_t signedValue = static_cast<std::int64_t>(value);
 			if (bitCount < 64) {
 				const std::int64_t minimum = -(std::int64_t(1) << (bitCount - 1));
 				const std::int64_t maximum = (std::int64_t(1) << (bitCount - 1)) - 1;
-				if (signedValue < minimum || signedValue > maximum)
-					return false;
+				if (signedValue < minimum || signedValue > maximum) {
+					failed = true;
+					return *this;
+				}
 			}
 		} else if (bitCount < 64 && static_cast<std::uint64_t>(value) >= (std::uint64_t(1) << bitCount)) {
-			return false;
+			failed = true;
+			return *this;
 		}
 
 		typedef typename std::make_unsigned<T>::type UnsignedType;
-		return WriteBits(static_cast<std::uint64_t>(static_cast<UnsignedType>(value)), bitCount);
+		if (!WriteBits(static_cast<std::uint64_t>(static_cast<UnsignedType>(value)), bitCount))
+			failed = true;
+		return *this;
 	}
-	bool WriteScalar(bool value) { return WriteScalar(static_cast<std::uint8_t>(value ? 1 : 0), 1); }
+	ReplicationWriter &WriteScalar(bool value) { return WriteScalar(static_cast<std::uint8_t>(value ? 1 : 0), 1); }
 
 	// Serializes floating-point values without changing their IEEE representation.
-	bool WriteScalar(float value);
-	bool WriteScalar(double value);
+	ReplicationWriter &WriteScalar(float value);
+	ReplicationWriter &WriteScalar(double value);
+
+	// Reports whether every operation in the chain succeeded.
+	explicit operator bool() const { return !failed; }
 
 	// Completes the last byte with zero padding and prevents further writes.
 	void Flush();
@@ -125,6 +137,8 @@ private:
 	std::size_t bitOffset;
 	// A flushed payload is immutable and ready for transport.
 	bool flushed;
+	// Prevents all operations after the first invalid or out-of-bounds write.
+	bool failed;
 };
 
 class ReplicationReader
@@ -133,22 +147,28 @@ public:
 	// Reads one bit-packed provider payload without taking ownership of its source buffer.
 	ReplicationReader(const void *buffer, std::size_t size);
 
-	// Copies opaque bytes from the current bit position.
-	bool ReadBytes(void *destination, std::size_t size) const;
+	// Copies opaque bytes and retains a failure for the rest of the chain.
+	const ReplicationReader &ReadBytes(void *destination, std::size_t size) const;
 
 	// Deserializes an integral value written with its native width.
-	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type ReadScalar(T &value) const { return ReadScalar(value, static_cast<unsigned int>(sizeof(T) * 8)); }
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, const ReplicationReader &>::type ReadScalar(T &value) const { return ReadScalar(value, static_cast<unsigned int>(sizeof(T) * 8)); }
 
 	// Deserializes a compact integral field and restores signed two's-complement
 	// values.
-	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, bool>::type ReadScalar(T &value, unsigned int bitCount) const
+	template <class T> typename std::enable_if<std::is_integral<T>::value && !std::is_same<T, bool>::value, const ReplicationReader &>::type ReadScalar(T &value, unsigned int bitCount) const
 	{
-		if (!bitCount || bitCount > sizeof(T) * 8)
-			return false;
+		if (failed)
+			return *this;
+		if (!bitCount || bitCount > sizeof(T) * 8) {
+			failed = true;
+			return *this;
+		}
 
 		std::uint64_t decoded = 0;
-		if (!ReadBits(decoded, bitCount))
-			return false;
+		if (!ReadBits(decoded, bitCount)) {
+			failed = true;
+			return *this;
+		}
 
 		typedef typename std::make_unsigned<T>::type UnsignedType;
 		UnsignedType converted = static_cast<UnsignedType>(decoded);
@@ -156,21 +176,24 @@ public:
 			converted |= static_cast<UnsignedType>(~UnsignedType(0) << bitCount);
 		}
 		value = static_cast<T>(converted);
-		return true;
+		return *this;
 	}
-	bool ReadScalar(bool &value) const
+	const ReplicationReader &ReadScalar(bool &value) const
 	{
 		std::uint8_t encoded = 0;
-		if (!ReadScalar(encoded, 1))
-			return false;
-		value = encoded != 0;
-		return true;
+		ReadScalar(encoded, 1);
+		if (!failed)
+			value = encoded != 0;
+		return *this;
 	}
 
 	// Deserializes floating-point values without changing their IEEE
 	// representation.
-	bool ReadScalar(float &value) const;
-	bool ReadScalar(double &value) const;
+	const ReplicationReader &ReadScalar(float &value) const;
+	const ReplicationReader &ReadScalar(double &value) const;
+
+	// Reports whether every operation in the chain succeeded.
+	explicit operator bool() const { return !failed; }
 
 	// Accepts only an exactly consumed payload with zero-valued final padding bits.
 	bool Finish() const;
@@ -184,4 +207,6 @@ private:
 	std::size_t size;
 	// Identifies the next payload bit, including a partially consumed byte.
 	mutable std::size_t bitOffset;
+	// Prevents all operations after the first invalid or out-of-bounds read.
+	mutable bool failed;
 };

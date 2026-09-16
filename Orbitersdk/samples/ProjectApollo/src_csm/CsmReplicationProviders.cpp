@@ -260,32 +260,28 @@ ProviderResult CsmLightingProvider::Capture(const char *groupKey, ReplicationWri
 	if (std::strcmp(groupKey, PresentationGroupKey) != 0)
 		return ProviderResult::Unsupported;
 
-	for (FloodLights *lights : floodLights) {
-		if (!writer.WriteScalar(static_cast<float>(lights->GetCombinedOutput())))
-			return ProviderResult::BufferTooSmall;
-	}
-	for (IntegralLights *lights : integralLights) {
-		if (!writer.WriteScalar(static_cast<float>(lights->GetOutput())))
-			return ProviderResult::BufferTooSmall;
-	}
-	for (NumericLights *lights : numericLights) {
-		if (!writer.WriteScalar(static_cast<float>(lights->GetOutput())))
-			return ProviderResult::BufferTooSmall;
-	}
-	return ProviderResult::Success;
+	for (FloodLights *lights : floodLights)
+		writer.WriteScalar(static_cast<float>(lights->GetCombinedOutput()));
+	for (IntegralLights *lights : integralLights)
+		writer.WriteScalar(static_cast<float>(lights->GetOutput()));
+	for (NumericLights *lights : numericLights)
+		writer.WriteScalar(static_cast<float>(lights->GetOutput()));
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 }
 
 ProviderResult CsmLightingProvider::Read(const ReplicationReader &reader, bool apply) const
 {
 	float outputs[8] = {};
-	for (float &output : outputs) {
-		if (!reader.ReadScalar(output))
-			return ProviderResult::Malformed;
+	for (float &output : outputs)
+		reader.ReadScalar(output);
+	const bool payloadComplete = reader.Finish();
+	if (!payloadComplete)
+		return ProviderResult::Malformed;
+
+	for (float output : outputs) {
 		if (!std::isfinite(output) || output < 0.0f || output > 10.0f)
 			return ProviderResult::Rejected;
 	}
-	if (!reader.Finish())
-		return ProviderResult::Malformed;
 
 	if (apply) {
 		for (int index = 0; index < 3; index++)

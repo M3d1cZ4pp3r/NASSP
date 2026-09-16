@@ -2,37 +2,47 @@
 
 #include <cstring>
 
-ReplicationWriter::ReplicationWriter(void *buffer, std::size_t capacity) : buffer(static_cast<std::uint8_t *>(buffer)), capacity(capacity), bitOffset(0), flushed(false) {}
+ReplicationWriter::ReplicationWriter(void *buffer, std::size_t capacity) : buffer(static_cast<std::uint8_t *>(buffer)), capacity(capacity), bitOffset(0), flushed(false), failed(false) {}
 
-bool ReplicationWriter::WriteBytes(const void *data, std::size_t dataSize)
+ReplicationWriter &ReplicationWriter::WriteBytes(const void *data, std::size_t dataSize)
 {
-	if (!data && dataSize)
-		return false;
+	if (failed)
+		return *this;
+	if (!data && dataSize) {
+		failed = true;
+		return *this;
+	}
 
 	const std::uint8_t *bytes = static_cast<const std::uint8_t *>(data);
 	const std::size_t originalBitOffset = bitOffset;
 	for (std::size_t index = 0; index < dataSize; index++) {
-		const bool byteWritten = WriteBits(bytes[index], 8);
-		if (!byteWritten) {
+		if (!WriteBits(bytes[index], 8)) {
 			bitOffset = originalBitOffset;
-			return false;
+			failed = true;
+			return *this;
 		}
 	}
-	return true;
+	return *this;
 }
 
-bool ReplicationWriter::WriteScalar(float value)
+ReplicationWriter &ReplicationWriter::WriteScalar(float value)
 {
+	if (failed)
+		return *this;
 	std::uint32_t bits = 0;
 	std::memcpy(&bits, &value, sizeof(bits));
-	return WriteScalar(bits);
+	WriteScalar(bits);
+	return *this;
 }
 
-bool ReplicationWriter::WriteScalar(double value)
+ReplicationWriter &ReplicationWriter::WriteScalar(double value)
 {
+	if (failed)
+		return *this;
 	std::uint64_t bits = 0;
 	std::memcpy(&bits, &value, sizeof(bits));
-	return WriteScalar(bits);
+	WriteScalar(bits);
+	return *this;
 }
 
 bool ReplicationWriter::WriteBits(std::uint64_t value, unsigned int bitCount)
@@ -63,6 +73,8 @@ bool ReplicationWriter::WriteBits(std::uint64_t value, unsigned int bitCount)
 
 void ReplicationWriter::Flush()
 {
+	if (failed)
+		return;
 	const unsigned int usedBits = static_cast<unsigned int>(bitOffset % 8);
 	if (usedBits)
 		buffer[bitOffset / 8] &= static_cast<std::uint8_t>((1u << usedBits) - 1);
@@ -79,45 +91,51 @@ std::size_t ReplicationWriter::Capacity() const
 	return capacity;
 }
 
-ReplicationReader::ReplicationReader(const void *buffer, std::size_t size) : buffer(static_cast<const std::uint8_t *>(buffer)), size(size), bitOffset(0) {}
+ReplicationReader::ReplicationReader(const void *buffer, std::size_t size) : buffer(static_cast<const std::uint8_t *>(buffer)), size(size), bitOffset(0), failed(false) {}
 
-bool ReplicationReader::ReadBytes(void *destination, std::size_t destinationSize) const
+const ReplicationReader &ReplicationReader::ReadBytes(void *destination, std::size_t destinationSize) const
 {
-	if (!destination && destinationSize)
-		return false;
+	if (failed)
+		return *this;
+	if (!destination && destinationSize) {
+		failed = true;
+		return *this;
+	}
 
 	std::uint8_t *bytes = static_cast<std::uint8_t *>(destination);
 	const std::size_t originalBitOffset = bitOffset;
 	for (std::size_t index = 0; index < destinationSize; index++) {
 		std::uint64_t byte = 0;
-		const bool byteRead = ReadBits(byte, 8);
-		if (!byteRead) {
+		if (!ReadBits(byte, 8)) {
 			bitOffset = originalBitOffset;
-			return false;
+			failed = true;
+			return *this;
 		}
 		bytes[index] = static_cast<std::uint8_t>(byte);
 	}
-	return true;
+	return *this;
 }
 
-bool ReplicationReader::ReadScalar(float &value) const
+const ReplicationReader &ReplicationReader::ReadScalar(float &value) const
 {
+	if (failed)
+		return *this;
 	std::uint32_t bits = 0;
-	const bool bitsRead = ReadScalar(bits);
-	if (!bitsRead)
-		return false;
-	std::memcpy(&value, &bits, sizeof(value));
-	return true;
+	ReadScalar(bits);
+	if (!failed)
+		std::memcpy(&value, &bits, sizeof(value));
+	return *this;
 }
 
-bool ReplicationReader::ReadScalar(double &value) const
+const ReplicationReader &ReplicationReader::ReadScalar(double &value) const
 {
+	if (failed)
+		return *this;
 	std::uint64_t bits = 0;
-	const bool bitsRead = ReadScalar(bits);
-	if (!bitsRead)
-		return false;
-	std::memcpy(&value, &bits, sizeof(value));
-	return true;
+	ReadScalar(bits);
+	if (!failed)
+		std::memcpy(&value, &bits, sizeof(value));
+	return *this;
 }
 
 bool ReplicationReader::ReadBits(std::uint64_t &value, unsigned int bitCount) const
@@ -150,13 +168,19 @@ bool ReplicationReader::ReadBits(std::uint64_t &value, unsigned int bitCount) co
 
 bool ReplicationReader::Finish() const
 {
-	const std::size_t consumedBytes = (bitOffset + 7) / 8;
-	if (consumedBytes != size)
+	if (failed)
 		return false;
+	const std::size_t consumedBytes = (bitOffset + 7) / 8;
+	if (consumedBytes != size) {
+		failed = true;
+		return false;
+	}
 
 	const unsigned int usedBits = static_cast<unsigned int>(bitOffset % 8);
-	if (usedBits && (buffer[size - 1] & static_cast<std::uint8_t>(0xffu << usedBits)))
+	if (usedBits && (buffer[size - 1] & static_cast<std::uint8_t>(0xffu << usedBits))) {
+		failed = true;
 		return false;
+	}
 
 	return true;
 }

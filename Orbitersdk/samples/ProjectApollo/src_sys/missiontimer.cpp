@@ -321,15 +321,11 @@ ProviderResult MissionTimer::Capture(const char *groupKey, ReplicationWriter &wr
 		(IsDisplayPowered() ? 1U << 1 : 0U) |
 		(externalTimingEquipment && externalTimingEquipment->TimingSignal() ? 1U << 2 : 0U);
 
-	if (!writer.WriteScalar(displayedHours, TimerHourBitCount))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteScalar(displayedMinutes, TimerMinuteBitCount))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteScalar(displayedSeconds, TimerSecondBitCount))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteScalar(flags, TimerFlagBitCount))
-		return ProviderResult::BufferTooSmall;
-	return ProviderResult::Success;
+	writer.WriteScalar(displayedHours, TimerHourBitCount)
+		.WriteScalar(displayedMinutes, TimerMinuteBitCount)
+		.WriteScalar(displayedSeconds, TimerSecondBitCount)
+		.WriteScalar(flags, TimerFlagBitCount);
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 }
 
 ProviderResult MissionTimer::ReadReplication(const ReplicationReader &reader, MissionTimer *target) const
@@ -339,15 +335,12 @@ ProviderResult MissionTimer::ReadReplication(const ReplicationReader &reader, Mi
 	std::uint8_t displayedSeconds;
 	std::uint8_t flags;
 
-	if (!reader.ReadScalar(displayedHours, TimerHourBitCount))
-		return ProviderResult::Malformed;
-	if (!reader.ReadScalar(displayedMinutes, TimerMinuteBitCount))
-		return ProviderResult::Malformed;
-	if (!reader.ReadScalar(displayedSeconds, TimerSecondBitCount))
-		return ProviderResult::Malformed;
-	if (!reader.ReadScalar(flags, TimerFlagBitCount))
-		return ProviderResult::Malformed;
-	if (!reader.Finish())
+	reader.ReadScalar(displayedHours, TimerHourBitCount)
+		.ReadScalar(displayedMinutes, TimerMinuteBitCount)
+		.ReadScalar(displayedSeconds, TimerSecondBitCount)
+		.ReadScalar(flags, TimerFlagBitCount);
+	const bool payloadComplete = reader.Finish();
+	if (!payloadComplete)
 		return ProviderResult::Malformed;
 	if (displayedHours > 999 || displayedMinutes > 59 || displayedSeconds > 59)
 		return ProviderResult::Rejected;

@@ -152,19 +152,15 @@ bool PanelSwitchItem::WriteReplicationValue(ReplicationWriter &writer)
 	const PanelReplicationValueType type = GetReplicationValueType();
 	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation) {
 		const std::uint32_t stateValue = static_cast<std::uint32_t>(value & PanelReplicationStateMask);
-		if (!writer.WriteScalar(stateValue, ReplicationStateBitCount()))
-			return false;
-		if (ReplicatesHeldState()) {
-			if (!writer.WriteScalar((value & PanelReplicationHeld) != 0))
-				return false;
-		}
-		if (ReplicatesGuardState()) {
-			if (!writer.WriteScalar((value & PanelReplicationGuard) != 0))
-				return false;
-		}
-		return true;
+		writer.WriteScalar(stateValue, ReplicationStateBitCount());
+		if (ReplicatesHeldState())
+			writer.WriteScalar((value & PanelReplicationHeld) != 0);
+		if (ReplicatesGuardState())
+			writer.WriteScalar((value & PanelReplicationGuard) != 0);
+		return static_cast<bool>(writer);
 	}
-	return writer.WriteScalar(value);
+	writer.WriteScalar(value);
+	return static_cast<bool>(writer);
 }
 
 bool PanelSwitchItem::ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const
@@ -172,26 +168,24 @@ bool PanelSwitchItem::ReadReplicationValue(const ReplicationReader &reader, Pane
 	const PanelReplicationValueType type = GetReplicationValueType();
 	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation) {
 		std::uint32_t stateValue = 0;
-		if (!reader.ReadScalar(stateValue, ReplicationStateBitCount()))
-			return false;
+		reader.ReadScalar(stateValue, ReplicationStateBitCount());
 
 		value = stateValue;
 		bool flag = false;
 		if (ReplicatesHeldState()) {
-			if (!reader.ReadScalar(flag))
-				return false;
+			reader.ReadScalar(flag);
 			if (flag)
 				value |= PanelReplicationHeld;
 		}
 		if (ReplicatesGuardState()) {
-			if (!reader.ReadScalar(flag))
-				return false;
+			reader.ReadScalar(flag);
 			if (flag)
 				value |= PanelReplicationGuard;
 		}
-		return true;
+		return static_cast<bool>(reader);
 	}
-	return reader.ReadScalar(value);
+	reader.ReadScalar(value);
+	return static_cast<bool>(reader);
 }
 
 unsigned int PanelSwitchItem::ReplicationStateBitCount() const

@@ -61,20 +61,17 @@ struct CautionWarningPresentation
 
 ProviderResult ReadMasterAlarmInput(const ReplicationReader &reader, bool &pressed)
 {
-	const bool read = reader.ReadScalar(pressed);
+	reader.ReadScalar(pressed);
 	const bool payloadComplete = reader.Finish();
-	return read && payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
+	return payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
 }
 
 ProviderResult ReadCautionWarningPresentation(const ReplicationReader &reader, CautionWarningPresentation &presentation)
 {
-	const bool lightsRead = reader.ReadScalar(presentation.lights, CautionWarningLightBitCount);
-	if (!lightsRead)
-		return ProviderResult::Malformed;
-
-	const bool masterAlarmRead = reader.ReadScalar(presentation.masterAlarm, MasterAlarmBitCount);
+	reader.ReadScalar(presentation.lights, CautionWarningLightBitCount)
+		.ReadScalar(presentation.masterAlarm, MasterAlarmBitCount);
 	const bool payloadComplete = reader.Finish();
-	return masterAlarmRead && payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
+	return payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
 }
 }
 
@@ -830,18 +827,16 @@ ProviderResult CSMCautionWarningSystem::Capture(const char *groupKey, Replicatio
 {
 	if (std::strcmp(groupKey, "master_alarm_input") == 0) {
 		const bool pressed = IsMasterAlarmPressed();
-		const bool written = writer.WriteScalar(pressed);
-		return written ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+		writer.WriteScalar(pressed);
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 	}
 
 	if (std::strcmp(groupKey, "visible_lights") == 0) {
 		const std::uint64_t lights = GetDisplayedLightBits();
 		const std::uint8_t masterAlarm = static_cast<std::uint8_t>(GetDisplayedMasterAlarmBits());
-		const bool lightsWritten = writer.WriteScalar(lights, CautionWarningLightBitCount);
-		if (!lightsWritten)
-			return ProviderResult::BufferTooSmall;
-		const bool masterAlarmWritten = writer.WriteScalar(masterAlarm, MasterAlarmBitCount);
-		return masterAlarmWritten ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+		writer.WriteScalar(lights, CautionWarningLightBitCount)
+			.WriteScalar(masterAlarm, MasterAlarmBitCount);
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 	}
 
 	return ProviderResult::Unsupported;

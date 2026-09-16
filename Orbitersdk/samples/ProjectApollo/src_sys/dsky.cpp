@@ -148,7 +148,6 @@
 
 #include "nasspdefs.h"
 
-#include <climits>
 #include <cmath>
 
 static char TwoSpace[] = "  ";
@@ -1655,23 +1654,23 @@ ProviderResult DSKY::Describe(ReplicationCatalogBuilder &catalog) const
 	schema.AddString("lights");
 	schema.AddUint32(DSKYLightBitCount);
 	schema.AddString("prog");
-	schema.AddUint32((sizeof(Prog) - 1) * CHAR_BIT);
+	schema.AddUint32((sizeof(Prog) - 1) * 8);
 	schema.AddString("verb");
-	schema.AddUint32((sizeof(Verb) - 1) * CHAR_BIT);
+	schema.AddUint32((sizeof(Verb) - 1) * 8);
 	schema.AddString("noun");
-	schema.AddUint32((sizeof(Noun) - 1) * CHAR_BIT);
+	schema.AddUint32((sizeof(Noun) - 1) * 8);
 	schema.AddString("r1");
-	schema.AddUint32((sizeof(R1) - 1) * CHAR_BIT);
+	schema.AddUint32((sizeof(R1) - 1) * 8);
 	schema.AddString("r2");
-	schema.AddUint32((sizeof(R2) - 1) * CHAR_BIT);
+	schema.AddUint32((sizeof(R2) - 1) * 8);
 	schema.AddString("r3");
-	schema.AddUint32((sizeof(R3) - 1) * CHAR_BIT);
+	schema.AddUint32((sizeof(R3) - 1) * 8);
 	schema.AddString("flags");
 	schema.AddUint32(DSKYFlagBitCount);
 	schema.AddString("status_brightness");
-	schema.AddUint32(sizeof(float) * CHAR_BIT);
+	schema.AddUint32(sizeof(float) * 8);
 	schema.AddString("segment_brightness");
-	schema.AddUint32(sizeof(float) * CHAR_BIT);
+	schema.AddUint32(sizeof(float) * 8);
 
 	ReplicationGroupDescriptor presentation;
 	presentation.key = DSKYPresentationGroupKey;
@@ -1719,17 +1718,12 @@ ProviderResult DSKY::Capture(const char *groupKey, ReplicationWriter &writer, co
 	memcpy(characters + 12, R2, 6);
 	memcpy(characters + 18, R3, 6);
 
-	if (!writer.WriteScalar(lights, DSKYLightBitCount))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteBytes(characters, sizeof(characters)))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteScalar(flags, DSKYFlagBitCount))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteScalar(static_cast<float>(GetDisplayedStatusBrightness())))
-		return ProviderResult::BufferTooSmall;
-	if (!writer.WriteScalar(static_cast<float>(GetDisplayedSegmentBrightness())))
-		return ProviderResult::BufferTooSmall;
-	return ProviderResult::Success;
+	writer.WriteScalar(lights, DSKYLightBitCount)
+		.WriteBytes(characters, sizeof(characters))
+		.WriteScalar(flags, DSKYFlagBitCount)
+		.WriteScalar(static_cast<float>(GetDisplayedStatusBrightness()))
+		.WriteScalar(static_cast<float>(GetDisplayedSegmentBrightness()));
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 }
 
 ProviderResult DSKY::ReadReplication(const ReplicationReader &reader, DSKY *target) const
@@ -1740,17 +1734,13 @@ ProviderResult DSKY::ReadReplication(const ReplicationReader &reader, DSKY *targ
 	float statusBrightness;
 	float segmentBrightness;
 
-	if (!reader.ReadScalar(lights, DSKYLightBitCount))
-		return ProviderResult::Malformed;
-	if (!reader.ReadBytes(characters, sizeof(characters)))
-		return ProviderResult::Malformed;
-	if (!reader.ReadScalar(flags, DSKYFlagBitCount))
-		return ProviderResult::Malformed;
-	if (!reader.ReadScalar(statusBrightness))
-		return ProviderResult::Malformed;
-	if (!reader.ReadScalar(segmentBrightness))
-		return ProviderResult::Malformed;
-	if (!reader.Finish())
+	reader.ReadScalar(lights, DSKYLightBitCount)
+		.ReadBytes(characters, sizeof(characters))
+		.ReadScalar(flags, DSKYFlagBitCount)
+		.ReadScalar(statusBrightness)
+		.ReadScalar(segmentBrightness);
+	const bool payloadComplete = reader.Finish();
+	if (!payloadComplete)
 		return ProviderResult::Malformed;
 
 	for (unsigned int i = 0; i < sizeof(characters); i++) {

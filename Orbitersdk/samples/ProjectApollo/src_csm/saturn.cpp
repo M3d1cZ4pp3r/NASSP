@@ -1199,74 +1199,26 @@ void Saturn::initSaturn()
 void Saturn::RegisterReplicationProviders()
 {
 	ReplicationHub &hub = GetReplicationHub();
-	const ReplicationHub::RegistrationResult panelResult = hub.Register(panelControlProvider);
-	if (panelResult != ReplicationHub::RegistrationResult::Success)
-		return;
-
-	const ReplicationHub::RegistrationResult cautionWarningResult = hub.Register(cws);
-	if (cautionWarningResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult lightingResult = hub.Register(lightingProvider);
-	if (lightingResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult mainDskyResult = hub.Register(dsky);
-	if (mainDskyResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult lebDskyResult = hub.Register(dsky2);
-	if (lebDskyResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult edaResult = hub.Register(eda);
-	if (edaResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult leftFdaiResult = hub.Register(fdaiLeft);
-	if (leftFdaiResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult rightFdaiResult = hub.Register(fdaiRight);
-	if (rightFdaiResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult missionTimerResult = hub.Register(MissionTimerDisplay);
-	if (missionTimerResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult lebMissionTimerResult = hub.Register(MissionTimer306Display);
-	if (lebMissionTimerResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult eventTimerResult = hub.Register(EventTimerDisplay);
-	if (eventTimerResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
-	}
-
-	const ReplicationHub::RegistrationResult lebEventTimerResult = hub.Register(EventTimer306Display);
-	if (lebEventTimerResult != ReplicationHub::RegistrationResult::Success) {
-		hub.UnregisterAll();
-		return;
+	IReplicationProvider *const providers[] = {
+		&panelControlProvider,
+		&cws,
+		&lightingProvider,
+		&dsky,
+		&dsky2,
+		&eda,
+		&fdaiLeft,
+		&fdaiRight,
+		&MissionTimerDisplay,
+		&MissionTimer306Display,
+		&EventTimerDisplay,
+		&EventTimer306Display
+	};
+	for (unsigned int i = 0; i < sizeof(providers) / sizeof(providers[0]); i++) {
+		const ReplicationHub::RegistrationResult result = hub.Register(*providers[i]);
+		if (result != ReplicationHub::RegistrationResult::Success) {
+			hub.UnregisterAll();
+			return;
+		}
 	}
 
 	const ReplicationHub::RegistrationResult sealResult = hub.SealCatalog();

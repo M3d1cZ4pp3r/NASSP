@@ -35,7 +35,6 @@
 #include "tracer.h"
 #include "papi.h"
 
-#include <climits>
 #include <cmath>
 #include <cstring>
 #include <time.h>
@@ -1713,27 +1712,17 @@ void ASCP::LoadState(FILEHANDLE scn){
 namespace
 {
 const char EDAPresentationGroupKey[] = "presentation";
+const unsigned int EDAFieldBitCount = sizeof(double) * 8;
+const unsigned int EDAFieldCount = 18;
 
-bool WriteEDAVector(ReplicationWriter &writer, const VECTOR3 &value)
+ReplicationWriter &WriteEDAVector(ReplicationWriter &writer, const VECTOR3 &value)
 {
-	if (!writer.WriteScalar(value.x))
-		return false;
-	if (!writer.WriteScalar(value.y))
-		return false;
-	if (!writer.WriteScalar(value.z))
-		return false;
-	return true;
+	return writer.WriteScalar(value.x).WriteScalar(value.y).WriteScalar(value.z);
 }
 
-bool ReadEDAVector(const ReplicationReader &reader, VECTOR3 &value)
+const ReplicationReader &ReadEDAVector(const ReplicationReader &reader, VECTOR3 &value)
 {
-	if (!reader.ReadScalar(value.x))
-		return false;
-	if (!reader.ReadScalar(value.y))
-		return false;
-	if (!reader.ReadScalar(value.z))
-		return false;
-	return true;
+	return reader.ReadScalar(value.x).ReadScalar(value.y).ReadScalar(value.z);
 }
 
 bool IsFiniteEDAVector(const VECTOR3 &value)
@@ -1772,7 +1761,7 @@ const char *EDA::ComponentKey() const
 
 ProviderResult EDA::Describe(ReplicationCatalogBuilder &catalog) const
 {
-	const char *fields[] = {
+	const char *fields[EDAFieldCount] = {
 		"fdai1_attitude_x", "fdai1_attitude_y", "fdai1_attitude_z",
 		"fdai2_attitude_x", "fdai2_attitude_y", "fdai2_attitude_z",
 		"fdai1_rate_x", "fdai1_rate_y", "fdai1_rate_z",
@@ -1781,9 +1770,9 @@ ProviderResult EDA::Describe(ReplicationCatalogBuilder &catalog) const
 		"fdai2_error_x", "fdai2_error_y", "fdai2_error_z"
 	};
 	ReplicationSchemaBuilder schema;
-	for (unsigned int i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
+	for (unsigned int i = 0; i < EDAFieldCount; i++) {
 		schema.AddString(fields[i]);
-		schema.AddUint32(sizeof(double) * CHAR_BIT);
+		schema.AddUint32(EDAFieldBitCount);
 	}
 
 	ReplicationGroupDescriptor presentation;
@@ -1792,7 +1781,7 @@ ProviderResult EDA::Describe(ReplicationCatalogBuilder &catalog) const
 	presentation.delivery = ReplicationDelivery::Unreliable;
 	presentation.periodicIntervalMs = 33;
 	presentation.replicateChanges = false;
-	presentation.maximumPayloadBytes = 18 * sizeof(double);
+	presentation.maximumPayloadBytes = EDAFieldCount * EDAFieldBitCount / 8;
 	catalog.AddGroup(presentation);
 	return ProviderResult::Success;
 }
@@ -1802,19 +1791,13 @@ ProviderResult EDA::Capture(const char *groupKey, ReplicationWriter &writer, con
 	if (strcmp(groupKey, EDAPresentationGroupKey) != 0)
 		return ProviderResult::Unsupported;
 
-	if (!WriteEDAVector(writer, FDAI1Attitude))
-		return ProviderResult::BufferTooSmall;
-	if (!WriteEDAVector(writer, FDAI2Attitude))
-		return ProviderResult::BufferTooSmall;
-	if (!WriteEDAVector(writer, FDAI1AttitudeRate))
-		return ProviderResult::BufferTooSmall;
-	if (!WriteEDAVector(writer, FDAI2AttitudeRate))
-		return ProviderResult::BufferTooSmall;
-	if (!WriteEDAVector(writer, FDAI1AttitudeError))
-		return ProviderResult::BufferTooSmall;
-	if (!WriteEDAVector(writer, FDAI2AttitudeError))
-		return ProviderResult::BufferTooSmall;
-	return ProviderResult::Success;
+	WriteEDAVector(writer, FDAI1Attitude);
+	WriteEDAVector(writer, FDAI2Attitude);
+	WriteEDAVector(writer, FDAI1AttitudeRate);
+	WriteEDAVector(writer, FDAI2AttitudeRate);
+	WriteEDAVector(writer, FDAI1AttitudeError);
+	WriteEDAVector(writer, FDAI2AttitudeError);
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 }
 
 ProviderResult EDA::ReadReplication(const ReplicationReader &reader, EDA *destination) const
@@ -1826,19 +1809,14 @@ ProviderResult EDA::ReadReplication(const ReplicationReader &reader, EDA *destin
 	VECTOR3 fdai1Error;
 	VECTOR3 fdai2Error;
 
-	if (!ReadEDAVector(reader, fdai1Attitude))
-		return ProviderResult::Malformed;
-	if (!ReadEDAVector(reader, fdai2Attitude))
-		return ProviderResult::Malformed;
-	if (!ReadEDAVector(reader, fdai1Rate))
-		return ProviderResult::Malformed;
-	if (!ReadEDAVector(reader, fdai2Rate))
-		return ProviderResult::Malformed;
-	if (!ReadEDAVector(reader, fdai1Error))
-		return ProviderResult::Malformed;
-	if (!ReadEDAVector(reader, fdai2Error))
-		return ProviderResult::Malformed;
-	if (!reader.Finish())
+	ReadEDAVector(reader, fdai1Attitude);
+	ReadEDAVector(reader, fdai2Attitude);
+	ReadEDAVector(reader, fdai1Rate);
+	ReadEDAVector(reader, fdai2Rate);
+	ReadEDAVector(reader, fdai1Error);
+	ReadEDAVector(reader, fdai2Error);
+	const bool payloadComplete = reader.Finish();
+	if (!payloadComplete)
 		return ProviderResult::Malformed;
 	if (!IsFiniteEDAVector(fdai1Attitude) || !IsFiniteEDAVector(fdai2Attitude) ||
 		!IsFiniteEDAVector(fdai1Rate) || !IsFiniteEDAVector(fdai2Rate) ||
