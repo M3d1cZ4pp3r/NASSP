@@ -806,6 +806,7 @@ public:
 	virtual ~SaturnEMSDvSetSwitch();
 	void Init(Saturn *s) { sat = s; };
 	int GetPosition() { return position; };
+	void SetPosition(int newPosition) { position = newPosition; };
 	bool CheckMouseClick(int event, int mx, int my);
 	bool CheckMouseClickVC(int event, VECTOR3 &p);
 

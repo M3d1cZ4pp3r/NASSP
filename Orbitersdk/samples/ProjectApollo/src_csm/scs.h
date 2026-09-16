@@ -27,6 +27,7 @@
 
 #include "DelayTimer.h"
 #include "replication/IReplicationProvider.h"
+#include "replication/ReplicaOverrideData.h"
 
 class Saturn;
 
@@ -834,13 +835,15 @@ protected:
 #define EMS_RSI_CENTER_X        42     //Pixel center on bitmap
 #define EMS_RSI_CENTER_Y        41     //Pixel center on bitmap
 
-class EMS : public e_object {
+class EMS : public e_object, public IReplicationProvider
+{
 
 public:
 	EMS(PanelSDK &p);
 	virtual ~EMS();
 	void Init(Saturn *vessel, e_object *a, e_object *b, ContinuousRotationalSwitch *dimmer, e_object *c);
 	void TimeStep(double simdt);
+	void ReplicaTimestep(double simdt);
 	void SystemTimestep(double simdt);
 	void SaveState(FILEHANDLE scn);                                // SaveState callback
 	void LoadState(FILEHANDLE scn);                                // LoadState callback
@@ -861,6 +864,12 @@ public:
 	bool IsdVMode();
 	bool WriteScrollToFile();
 	bool IsDecimalPointBlanked();
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	void DefineVCAnimations(UINT vc_idx);
 	void SetReference(const VECTOR3& ref, const VECTOR3& _dir);
@@ -868,8 +877,21 @@ public:
 	void DrawSwitchVC(int id, int event, SURFHANDLE surf);
 	
 protected:
+	struct ReplicatedPresentation
+	{
+		bool dvDisplayPowered;
+		bool spsThrustLight;
+		bool pt05GLight;
+		int liftVectorLight;
+	};
+
 	bool IsPowered();
 	bool IsDisplayPowered();
+	bool IsDVDisplayPowered();
+	ProviderResult ReadPresentation(const ReplicationReader &reader, EMS *target) const;
+	ProviderResult ReadBaselinePresentation(const ReplicationReader &reader, EMS *target) const;
+	ProviderResult ReadDvSetInput(const ReplicationReader &reader, std::uint8_t *position) const;
+	void UpdateScrollPresentation(bool reset);
 	
 	void AccelerometerTimeStep(double simdt);
 	double xacc, xaccG, constG;
@@ -926,6 +948,7 @@ protected:
 	PowerMerge DCPower;
 	Saturn *sat;
 	ContinuousRotationalSwitch *DimmerRotationalSwitch;
+	ReplicaOverrideData<ReplicatedPresentation> replicatedData;
 
 	friend class SaturnEMSDvDisplay;
 	friend class SaturnEMSScrollDisplay;

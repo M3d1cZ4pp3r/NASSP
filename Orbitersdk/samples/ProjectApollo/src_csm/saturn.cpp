@@ -1208,6 +1208,7 @@ void Saturn::RegisterReplicationProviders()
 		&eda,
 		&fdaiLeft,
 		&fdaiRight,
+		&ems,
 		&MissionTimerDisplay,
 		&MissionTimer306Display,
 		&EventTimerDisplay,
@@ -3441,6 +3442,7 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 	else {
 		// Needed to copy replicated EDA values to display on FDAI
 		FDAITimestep(simt, simdt);
+		ems.ReplicaTimestep(simdt);
 	}
 
 	if(stage < LAUNCH_STAGE_SIVB) {

@@ -4942,6 +4942,20 @@ void TVSA::LoadState(FILEHANDLE scn) {
 #define EMS_STATUS_EMS_TEST4	14
 #define EMS_STATUS_EMS_TEST5	15
 
+namespace
+{
+const char EMSPresentationGroupKey[] = "presentation";
+const char EMSDvSetInputGroupKey[] = "dv_set_input";
+const char EMSBaselinePresentationGroupKey[] = "baseline_presentation";
+const unsigned int EMSStatusBitCount = 4;
+const unsigned int EMSDvSetPositionBitCount = 3;
+const unsigned int EMSGScribeBitCount = 16;
+const unsigned int EMSPresentationFlagBitCount = 5;
+const unsigned int EMSScrollPointCountBitCount = 13;
+const unsigned int EMSPresentationPayloadBytes = 28;
+const unsigned int EMSBaselinePresentationPayloadBytes = sizeof(double) + 2 + EMS_SCROLL_LENGTH_PX * 3 * 4;
+}
+
 extern GDIParams g_Param;
 
 //#define IDS_WINDOWS_BITMAP_FILES			_T("Windows Bitmap Files (*.BMP; *.DIB)|*.BMP; *.DIB||" )
@@ -4950,6 +4964,233 @@ extern GDIParams g_Param;
 //#define DEFAULT_BITMAP_FILE_NAME			_T("EMS_Scroll")
 
 
+const char *EMS::ComponentKey() const
+{
+	return "csm.ems";
+}
+
+ProviderResult EMS::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	ReplicationSchemaBuilder presentationSchema;
+	presentationSchema.AddString("dv_range");
+	presentationSchema.AddUint32(sizeof(double) * 8);
+	presentationSchema.AddString("scroll_position");
+	presentationSchema.AddUint32(sizeof(double) * 8);
+	presentationSchema.AddString("rsi_target");
+	presentationSchema.AddUint32(sizeof(double) * 8);
+	presentationSchema.AddString("status");
+	presentationSchema.AddUint32(EMSStatusBitCount);
+	presentationSchema.AddString("g_scribe");
+	presentationSchema.AddUint32(EMSGScribeBitCount);
+	presentationSchema.AddString("flags");
+	presentationSchema.AddUint32(EMSPresentationFlagBitCount);
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = EMSPresentationGroupKey;
+	presentation.schemaId = presentationSchema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 33;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = EMSPresentationPayloadBytes;
+	catalog.AddGroup(presentation);
+
+	ReplicationSchemaBuilder inputSchema;
+	inputSchema.AddString("position");
+	inputSchema.AddUint32(EMSDvSetPositionBitCount);
+
+	ReplicationGroupDescriptor input;
+	input.key = EMSDvSetInputGroupKey;
+	input.schemaId = inputSchema.SchemaId();
+	input.delivery = ReplicationDelivery::Reliable;
+	input.clientReplicates = true;
+	input.replicateChanges = true;
+	input.maximumPayloadBytes = 1;
+	input.inputAuthorityHoldMs = 150;
+	catalog.AddGroup(input);
+
+	ReplicationSchemaBuilder baselinePresentationSchema;
+	baselinePresentationSchema.AddString("rsi_rotation");
+	baselinePresentationSchema.AddUint32(sizeof(double) * 8);
+	baselinePresentationSchema.AddString("point_count");
+	baselinePresentationSchema.AddUint32(EMSScrollPointCountBitCount);
+	baselinePresentationSchema.AddString("points_int16_xy_max_7500");
+
+	ReplicationGroupDescriptor baselinePresentation;
+	baselinePresentation.key = EMSBaselinePresentationGroupKey;
+	baselinePresentation.schemaId = baselinePresentationSchema.SchemaId();
+	baselinePresentation.delivery = ReplicationDelivery::Reliable;
+	baselinePresentation.replicateChanges = false;
+	baselinePresentation.maximumPayloadBytes = EMSBaselinePresentationPayloadBytes;
+	catalog.AddGroup(baselinePresentation);
+	return ProviderResult::Success;
+}
+
+ProviderResult EMS::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &)
+{
+	if (strcmp(groupKey, EMSDvSetInputGroupKey) == 0) {
+		const std::uint8_t position = static_cast<std::uint8_t>(sat->EMSDvSetSwitch.GetPosition());
+		writer.WriteScalar(position, EMSDvSetPositionBitCount);
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
+	if (strcmp(groupKey, EMSBaselinePresentationGroupKey) == 0) {
+		if (ScribePntCnt < 1 || ScribePntCnt > EMS_SCROLL_LENGTH_PX * 3)
+			return ProviderResult::Failed;
+		writer.WriteScalar(RSIRotation)
+			.WriteScalar(static_cast<std::uint16_t>(ScribePntCnt), EMSScrollPointCountBitCount);
+		for (int i = 0; i < ScribePntCnt; i++) {
+			writer.WriteScalar(static_cast<std::int16_t>(ScribePntArray[i].x))
+				.WriteScalar(static_cast<std::int16_t>(ScribePntArray[i].y));
+		}
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
+	if (strcmp(groupKey, EMSPresentationGroupKey) != 0)
+		return ProviderResult::Unsupported;
+
+	const std::uint8_t displayedStatus = static_cast<std::uint8_t>(status);
+	const std::int16_t displayedGScribe = static_cast<std::int16_t>(GScribe);
+	const int liftVectorLight = LiftVectLight();
+	const std::uint8_t encodedLiftVectorLight = liftVectorLight > 0 ? 1U : liftVectorLight < 0 ? 2U : 0U;
+	const std::uint8_t flags =
+		(IsDVDisplayPowered() ? 1U : 0U) |
+		(SPSThrustLight() ? 1U << 1 : 0U) |
+		(pt05GLight() ? 1U << 2 : 0U) |
+		(encodedLiftVectorLight << 3);
+
+	writer.WriteScalar(dVRangeCounter)
+		.WriteScalar(ScrollPosition)
+		.WriteScalar(RSITarget)
+		.WriteScalar(displayedStatus, EMSStatusBitCount)
+		.WriteScalar(displayedGScribe, EMSGScribeBitCount)
+		.WriteScalar(flags, EMSPresentationFlagBitCount);
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+}
+
+ProviderResult EMS::ReadDvSetInput(const ReplicationReader &reader, std::uint8_t *position) const
+{
+	std::uint8_t receivedPosition = 0;
+	reader.ReadScalar(receivedPosition, EMSDvSetPositionBitCount);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (receivedPosition > 4)
+		return ProviderResult::Rejected;
+
+	if (position)
+		*position = receivedPosition;
+	return ProviderResult::Success;
+}
+
+ProviderResult EMS::ReadPresentation(const ReplicationReader &reader, EMS *target) const
+{
+	double displayedDvRange = 0.0;
+	double displayedScrollPosition = 0.0;
+	double displayedRSITarget = 0.0;
+	std::uint8_t displayedStatus = 0;
+	std::int16_t displayedGScribe = 0;
+	std::uint8_t flags = 0;
+
+	reader.ReadScalar(displayedDvRange)
+		.ReadScalar(displayedScrollPosition)
+		.ReadScalar(displayedRSITarget)
+		.ReadScalar(displayedStatus, EMSStatusBitCount)
+		.ReadScalar(displayedGScribe, EMSGScribeBitCount)
+		.ReadScalar(flags, EMSPresentationFlagBitCount);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+
+	const std::uint8_t encodedLiftVectorLight = (flags >> 3) & 3U;
+	if (!std::isfinite(displayedDvRange) || displayedDvRange < -1000.0 || displayedDvRange > 14000.0 ||
+		!std::isfinite(displayedScrollPosition) || displayedScrollPosition < 0.0 || displayedScrollPosition > EMS_SCROLL_LENGTH_PX ||
+		!std::isfinite(displayedRSITarget) || displayedRSITarget < 0.0 || displayedRSITarget > TWO_PI ||
+		displayedStatus > EMS_STATUS_EMS_TEST5 || encodedLiftVectorLight > 2U)
+		return ProviderResult::Rejected;
+
+	if (target) {
+		target->dVRangeCounter = displayedDvRange;
+		target->ScrollPosition = displayedScrollPosition;
+		target->RSITarget = displayedRSITarget;
+		target->status = displayedStatus;
+		target->GScribe = displayedGScribe;
+		target->replicatedData->dvDisplayPowered = (flags & (1U << 0)) != 0;
+		target->replicatedData->spsThrustLight = (flags & (1U << 1)) != 0;
+		target->replicatedData->pt05GLight = (flags & (1U << 2)) != 0;
+		target->replicatedData->liftVectorLight = encodedLiftVectorLight == 1U ? 1 : encodedLiftVectorLight == 2U ? -1 : 0;
+		target->UpdateScrollPresentation(false);
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult EMS::ReadBaselinePresentation(const ReplicationReader &reader, EMS *target) const
+{
+	double displayedRSIRotation = 0.0;
+	std::uint16_t pointCount = 0;
+	reader.ReadScalar(displayedRSIRotation)
+		.ReadScalar(pointCount, EMSScrollPointCountBitCount);
+	if (!reader)
+		return ProviderResult::Malformed;
+	if (!std::isfinite(displayedRSIRotation) || displayedRSIRotation < 0.0 || displayedRSIRotation > TWO_PI ||
+		pointCount == 0 || pointCount > EMS_SCROLL_LENGTH_PX * 3)
+		return ProviderResult::Rejected;
+
+	for (std::uint16_t i = 0; i < pointCount; i++) {
+		std::int16_t x = 0;
+		std::int16_t y = 0;
+		reader.ReadScalar(x).ReadScalar(y);
+		if (!reader)
+			return ProviderResult::Malformed;
+		if (x < 0 || x > EMS_SCROLL_LENGTH_PX + 40)
+			return ProviderResult::Rejected;
+
+		if (target) {
+			target->ScribePntArray[i].x = x;
+			target->ScribePntArray[i].y = y;
+			target->ScribePntArrayVC[i].x = x * TexMul;
+			target->ScribePntArrayVC[i].y = y * TexMul;
+		}
+	}
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+
+	if (target) {
+		target->RSIRotation = displayedRSIRotation;
+		target->RotateRSI(0.0);
+		target->ScribePntCnt = pointCount;
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult EMS::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
+{
+	if (strcmp(groupKey, EMSDvSetInputGroupKey) == 0)
+		return ReadDvSetInput(reader, NULL);
+	if (strcmp(groupKey, EMSBaselinePresentationGroupKey) == 0)
+		return context.purpose == ApplyPurpose::Baseline ? ReadBaselinePresentation(reader, NULL) : ProviderResult::Unsupported;
+	if (strcmp(groupKey, EMSPresentationGroupKey) != 0 || context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+	return ReadPresentation(reader, NULL);
+}
+
+void EMS::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
+{
+	if (strcmp(groupKey, EMSDvSetInputGroupKey) == 0) {
+		std::uint8_t position = 0;
+		if (ReadDvSetInput(reader, &position) == ProviderResult::Success)
+			sat->EMSDvSetSwitch.SetPosition(position);
+		return;
+	}
+
+	if (strcmp(groupKey, EMSBaselinePresentationGroupKey) == 0) {
+		ReadBaselinePresentation(reader, this);
+		return;
+	}
+	if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !replicatedData.IsActive())
+		return;
+	ReadPresentation(reader, this);
+}
+
+void EMS::OnRoleChanged(ReplicationRole role)
+{
+	replicatedData.SetActive(role == ReplicationRole::Replica);
+}
 
 EMS::EMS(PanelSDK &p) : DCPower(0, p) {
 
@@ -5250,21 +5491,32 @@ void EMS::TimeStep(double simdt) {
 			if (ScrollPosition > MaxScrollPosition) {MaxScrollPosition = ScrollPosition;};
 		}
 
-		SlewScribe = (int)(ScrollPosition) + 40; //Offset of 40 to shift the drawing correctly
-
-		if (SlewScribe != ScribePntArray[ScribePntCnt-1].x || GScribe != ScribePntArray[ScribePntCnt-1].y) { //If either x or y has changed, add new point to trace
-			if (ScribePntCnt < EMS_SCROLL_LENGTH_PX*3) ScribePntCnt++;
-		}
-		ScribePntArray[ScribePntCnt-1].y = GScribe;
-		ScribePntArray[ScribePntCnt-1].x = SlewScribe;
-		ScribePntArrayVC[ScribePntCnt-1].y = GScribe*TexMul;
-		ScribePntArrayVC[ScribePntCnt-1].x = SlewScribe*TexMul;
-
-		//sprintf(oapiDebugString(), "ScribePt %d %d %d", ScribePntCnt, ScribePntArray[ScribePntCnt-1].x, ScribePntArray[ScribePntCnt-1].y);
-		//sprintf(oapiDebugString(), "ScrollPosition %f", ScrollPosition);
+		UpdateScrollPresentation(false);
 	}
 
 	RotateRSI(simdt);
+}
+
+void EMS::ReplicaTimestep(double simdt)
+{
+	RotateRSI(simdt);
+}
+
+void EMS::UpdateScrollPresentation(bool reset)
+{
+	SlewScribe = static_cast<int>(ScrollPosition) + 40;
+	if (reset) {
+		ScribePntCnt = 1;
+	}
+	else if (SlewScribe != ScribePntArray[ScribePntCnt - 1].x || GScribe != ScribePntArray[ScribePntCnt - 1].y) {
+		if (ScribePntCnt < EMS_SCROLL_LENGTH_PX * 3)
+			ScribePntCnt++;
+	}
+
+	ScribePntArray[ScribePntCnt - 1].x = SlewScribe;
+	ScribePntArray[ScribePntCnt - 1].y = GScribe;
+	ScribePntArrayVC[ScribePntCnt - 1].x = SlewScribe * TexMul;
+	ScribePntArrayVC[ScribePntCnt - 1].y = GScribe * TexMul;
 }
 
 void EMS::SystemTimestep(double simdt) {
@@ -5462,25 +5714,23 @@ short int EMS::VerifyCorridor() {
 
 bool EMS::SPSThrustLight() {
 
-	if (!IsPowered()) return false;	
-	
-	if (status == EMS_STATUS_DVTEST) return true;
-	if (sat->SPSEngine.IsThrustOnA() || sat->SPSEngine.IsThrustOnB()) return true;
-	return false;
+	bool lightOn = false;
+	if (IsPowered()) {
+		lightOn = status == EMS_STATUS_DVTEST || sat->SPSEngine.IsThrustOnA() || sat->SPSEngine.IsThrustOnB();
+	}
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::spsThrustLight, lightOn);
 }
 
 bool EMS::pt05GLight() {
 
-	if (!IsPowered()) return false;
-	if (pt05GFailed) return false;
-	if (pt05GLightOn) return true;
-	return false;
+	const bool lightOn = IsPowered() && !pt05GFailed && pt05GLightOn;
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::pt05GLight, lightOn);
 }
 
 int EMS::LiftVectLight() {
 
-	if (!IsPowered()) return 0;
-	return LiftVectLightOn;
+	const int light = IsPowered() ? LiftVectLightOn : 0;
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::liftVectorLight, light);
 }
 
 bool EMS::IsOff() {
@@ -5514,6 +5764,12 @@ bool EMS::IsDisplayPowered() {
 		return false;
 
 	return true;
+}
+
+bool EMS::IsDVDisplayPowered()
+{
+	const bool powered = IsDisplayPowered() && sat->EMSDvDisplay.Voltage() >= SP_MIN_DCVOLTAGE;
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::dvDisplayPowered, powered);
 }
 
 void EMS::SaveState(FILEHANDLE scn) {
