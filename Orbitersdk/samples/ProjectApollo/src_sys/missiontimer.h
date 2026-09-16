@@ -26,6 +26,8 @@
 #pragma once
 
 #include "timingequipment.h"
+#include "replication/IReplicationProvider.h"
+#include "replication/ReplicaOverrideData.h"
 
 #define MISSIONTIMER_2_START_STRING "MISSIONTIMER2_START"
 #define MISSIONTIMER_306_START_STRING "MISSIONTIMER306_START"
@@ -36,10 +38,11 @@
 
 class Saturn;
 
-class MissionTimer : public e_object {
+class MissionTimer : public e_object, public IReplicationProvider
+{
 
 public:
-	MissionTimer(PanelSDK &p);
+	MissionTimer(PanelSDK &p, const char *instanceKey = NULL);
 	virtual ~MissionTimer();
 
 	void Init(e_object *a, e_object *b, e_object *ltg, TimingEquipment* extTiming);
@@ -69,10 +72,23 @@ public:
 	int GetMinutes(){ return minutes; }
 	int GetSeconds(){ return seconds; }
 
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
+
 	virtual void Render(SURFHANDLE surf, SURFHANDLE digits, bool csm = false, int xTexMul = 1);
 	virtual void Render90(SURFHANDLE surf, SURFHANDLE digits, bool csm = false, int xTexMul =1);
 
 protected:
+	struct ReplicatedPresentation
+	{
+		bool powered;
+		bool displayPowered;
+		bool timingSignal;
+	};
 
 	//Function that controls what happens when the timer counts down through zero
 	virtual void CountingThroughZero(double &t);
@@ -98,6 +114,14 @@ protected:
 
 	PowerMerge DCPower;
 	TimingEquipment* externalTimingEquipment;
+
+	bool IsPoweredForDisplay();
+	bool IsDisplayPoweredForDisplay();
+	bool HasTimingSignalForDisplay();
+	ProviderResult ReadReplication(const ReplicationReader &reader, MissionTimer *target) const;
+
+	const char *replicationInstanceKey;
+	ReplicaOverrideData<ReplicatedPresentation> replicatedData;
 };
 
 //
@@ -106,7 +130,7 @@ protected:
 
 class EventTimer: public MissionTimer {
 public:
-	EventTimer(PanelSDK &p);
+	EventTimer(PanelSDK &p, const char *instanceKey = NULL);
 	virtual ~EventTimer();
 	void Init(e_object* a, e_object* b, e_object* ltg);
 	void Render(SURFHANDLE surf, SURFHANDLE digits, int xTexMul = 1);

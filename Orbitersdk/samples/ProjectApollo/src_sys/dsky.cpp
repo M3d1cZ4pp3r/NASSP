@@ -1808,8 +1808,10 @@ ProviderResult DSKY::Validate(const char *groupKey, const ReplicationReader &rea
 	return ReadReplication(reader, NULL);
 }
 
-void DSKY::Apply(const char *, const ReplicationReader &reader, const ApplyContext &)
+void DSKY::Apply(const char *, const ReplicationReader &reader, const ApplyContext &context)
 {
+	if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !replicatedPresentationActive)
+		return;
 	ReadReplication(reader, this);
 }
 

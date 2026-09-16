@@ -74,7 +74,7 @@ public:
 	ReplicationWriter(void *buffer, std::size_t capacity);
 
 	// Appends opaque bytes at the current bit position.
-	bool Write(const void *data, std::size_t size);
+	bool WriteBytes(const void *data, std::size_t size);
 
 	// Serializes an integral value with its native width in canonical
 	// least-significant-bit-first order.
@@ -104,8 +104,8 @@ public:
 	bool WriteScalar(bool value) { return WriteScalar(static_cast<std::uint8_t>(value ? 1 : 0), 1); }
 
 	// Serializes floating-point values without changing their IEEE representation.
-	bool WriteValue(float value);
-	bool WriteValue(double value);
+	bool WriteScalar(float value);
+	bool WriteScalar(double value);
 
 	// Completes the last byte with zero padding and prevents further writes.
 	void Flush();

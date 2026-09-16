@@ -294,10 +294,10 @@ Saturn::Saturn(OBJHANDLE hObj, int fmodel) : ProjectApolloConnectorVessel (hObj,
 	LEBIntegralLights(Panelsdk, 7.1), //LEB Integral Power (watts)
 	LeftNumericLights(Panelsdk),
 	LEBNumericLights(Panelsdk),
-	MissionTimerDisplay(Panelsdk),
-	MissionTimer306Display(Panelsdk),
-	EventTimerDisplay(Panelsdk),
-	EventTimer306Display(Panelsdk),
+	MissionTimerDisplay(Panelsdk, "csm.timer.mission.panel2"),
+	MissionTimer306Display(Panelsdk, "csm.timer.mission.leb"),
+	EventTimerDisplay(Panelsdk, "csm.timer.event.panel1"),
+	EventTimer306Display(Panelsdk, "csm.timer.event.leb"),
 	NonEssBus1("Non-Essential-Bus1", &NonessBusSwitch),
 	NonEssBus2("Non-Essential-Bus2", &NonessBusSwitch),
 	ACBus1PhaseA("AC-Bus1-PhaseA", 115, NULL),
@@ -1221,6 +1221,30 @@ void Saturn::RegisterReplicationProviders()
 
 	const ReplicationHub::RegistrationResult lebDskyResult = hub.Register(dsky2);
 	if (lebDskyResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult missionTimerResult = hub.Register(MissionTimerDisplay);
+	if (missionTimerResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult lebMissionTimerResult = hub.Register(MissionTimer306Display);
+	if (lebMissionTimerResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult eventTimerResult = hub.Register(EventTimerDisplay);
+	if (eventTimerResult != ReplicationHub::RegistrationResult::Success) {
+		hub.UnregisterAll();
+		return;
+	}
+
+	const ReplicationHub::RegistrationResult lebEventTimerResult = hub.Register(EventTimer306Display);
+	if (lebEventTimerResult != ReplicationHub::RegistrationResult::Success) {
 		hub.UnregisterAll();
 		return;
 	}
@@ -3640,9 +3664,9 @@ int Saturn::clbkConsumeDirectKey(char *kstate)
 	// Only override these keys if the user is holding no modifier keys, Alt only, or Ctrl + Alt.
 	if (GetAttitudeMode() == ATTITUDEMODE::ATTMODE_ROT && !(KEYMOD_CONTROL(kstate) && !KEYMOD_ALT(kstate)) && !KEYMOD_SHIFT(kstate)) {
 		// Possible deflection amounts are:
-		// No key modifiers: 10.5° (max proportional rate, but not hardover)
-		// Alt: 11.5° (full deflection, triggering direct switches)
-		// Ctrl + Alt: 1.51° (triggering breakout switches)
+		// No key modifiers: 10.5ï¿½ (max proportional rate, but not hardover)
+		// Alt: 11.5ï¿½ (full deflection, triggering direct switches)
+		// Ctrl + Alt: 1.51ï¿½ (triggering breakout switches)
 		double deflectionDegrees = KEYMOD_ALT(kstate) ? KEYMOD_CONTROL(kstate) ? 1.51 : 11.5 : 10.5;
 		double deflectionPercent = deflectionDegrees / 11.5;
 

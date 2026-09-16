@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <math.h>
+#include <cstring>
 
 #include "soundlib.h"
 #include "nasspsound.h"
@@ -39,7 +40,16 @@
 #include "missiontimer.h"
 #include "papi.h"
 
-MissionTimer::MissionTimer(PanelSDK &p) : DCPower(0, p)
+namespace
+{
+const char *TimerPresentationGroupKey = "presentation";
+const unsigned int TimerHourBitCount = 10;
+const unsigned int TimerMinuteBitCount = 6;
+const unsigned int TimerSecondBitCount = 6;
+const unsigned int TimerFlagBitCount = 3;
+}
+
+MissionTimer::MissionTimer(PanelSDK &p, const char *instanceKey) : DCPower(0, p)
 {
 	Running = false;
 	CountUp = TIMER_COUNT_UP;
@@ -52,6 +62,8 @@ MissionTimer::MissionTimer(PanelSDK &p) : DCPower(0, p)
 	minutes = 0;
 	seconds = 0;
 	extra = 0.0;
+	externalTimingEquipment = NULL;
+	replicationInstanceKey = instanceKey;
 }
 
 MissionTimer::~MissionTimer()
@@ -253,6 +265,123 @@ double MissionTimer::GetTime()
 	return t;
 }
 
+bool MissionTimer::IsPoweredForDisplay()
+{
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::powered, IsPowered());
+}
+
+bool MissionTimer::IsDisplayPoweredForDisplay()
+{
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::displayPowered, IsDisplayPowered());
+}
+
+bool MissionTimer::HasTimingSignalForDisplay()
+{
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::timingSignal, externalTimingEquipment->TimingSignal());
+}
+
+const char *MissionTimer::ComponentKey() const
+{
+	return replicationInstanceKey;
+}
+
+ProviderResult MissionTimer::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	ReplicationSchemaBuilder schema;
+	schema.AddString("hours");
+	schema.AddUint32(TimerHourBitCount);
+	schema.AddString("minutes");
+	schema.AddUint32(TimerMinuteBitCount);
+	schema.AddString("seconds");
+	schema.AddUint32(TimerSecondBitCount);
+	schema.AddString("flags");
+	schema.AddUint32(TimerFlagBitCount);
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = TimerPresentationGroupKey;
+	presentation.schemaId = schema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 33;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = 4;
+	catalog.AddGroup(presentation);
+	return ProviderResult::Success;
+}
+
+ProviderResult MissionTimer::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &)
+{
+	if (strcmp(groupKey, TimerPresentationGroupKey) != 0)
+		return ProviderResult::Unsupported;
+
+	const std::uint16_t displayedHours = static_cast<std::uint16_t>(hours);
+	const std::uint8_t displayedMinutes = static_cast<std::uint8_t>(minutes);
+	const std::uint8_t displayedSeconds = static_cast<std::uint8_t>(seconds);
+	const std::uint8_t flags =
+		(IsPowered() ? 1U : 0U) |
+		(IsDisplayPowered() ? 1U << 1 : 0U) |
+		(externalTimingEquipment && externalTimingEquipment->TimingSignal() ? 1U << 2 : 0U);
+
+	if (!writer.WriteScalar(displayedHours, TimerHourBitCount))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteScalar(displayedMinutes, TimerMinuteBitCount))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteScalar(displayedSeconds, TimerSecondBitCount))
+		return ProviderResult::BufferTooSmall;
+	if (!writer.WriteScalar(flags, TimerFlagBitCount))
+		return ProviderResult::BufferTooSmall;
+	return ProviderResult::Success;
+}
+
+ProviderResult MissionTimer::ReadReplication(const ReplicationReader &reader, MissionTimer *target) const
+{
+	std::uint16_t displayedHours;
+	std::uint8_t displayedMinutes;
+	std::uint8_t displayedSeconds;
+	std::uint8_t flags;
+
+	if (!reader.ReadScalar(displayedHours, TimerHourBitCount))
+		return ProviderResult::Malformed;
+	if (!reader.ReadScalar(displayedMinutes, TimerMinuteBitCount))
+		return ProviderResult::Malformed;
+	if (!reader.ReadScalar(displayedSeconds, TimerSecondBitCount))
+		return ProviderResult::Malformed;
+	if (!reader.ReadScalar(flags, TimerFlagBitCount))
+		return ProviderResult::Malformed;
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (displayedHours > 999 || displayedMinutes > 59 || displayedSeconds > 59)
+		return ProviderResult::Rejected;
+
+	if (target) {
+		target->hours = displayedHours;
+		target->minutes = displayedMinutes;
+		target->seconds = displayedSeconds;
+		target->replicatedData->powered = (flags & (1U << 0)) != 0;
+		target->replicatedData->displayPowered = (flags & (1U << 1)) != 0;
+		target->replicatedData->timingSignal = (flags & (1U << 2)) != 0;
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult MissionTimer::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
+{
+	if (strcmp(groupKey, TimerPresentationGroupKey) != 0 || context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+	return ReadReplication(reader, NULL);
+}
+
+void MissionTimer::Apply(const char *, const ReplicationReader &reader, const ApplyContext &context)
+{
+	if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !replicatedData.IsActive())
+		return;
+	ReadReplication(reader, this);
+}
+
+void MissionTimer::OnRoleChanged(ReplicationRole role)
+{
+	replicatedData.SetActive(role == ReplicationRole::Replica);
+}
+
 //
 // The real mission timer couldn't handle negative times, so we don't either anymore.
 //
@@ -278,7 +407,7 @@ void MissionTimer::SetTime(double t)
 
 void MissionTimer::Render(SURFHANDLE surf, SURFHANDLE digits, bool csm, int TexMul)
 {
-	if (!IsPowered() || !IsDisplayPowered())
+	if (!IsPoweredForDisplay() || !IsDisplayPoweredForDisplay())
 		return;
 
 	const int DigitWidth = 21*TexMul;
@@ -286,7 +415,7 @@ void MissionTimer::Render(SURFHANDLE surf, SURFHANDLE digits, bool csm, int TexM
 	int Curdigit, divisor;
 
 	// Display tuning fork symbol if CTE (CM) or PCMTE (LM) reference is lost, and we're operating on internal frequency
-	if (!externalTimingEquipment->TimingSignal()) {
+	if (!HasTimingSignalForDisplay()) {
 		oapiBlt(surf, digits, 0, 0, (int)(DigitWidth * 13.33), 0, DigitWidth / 2, DigitHeight);
 	}
 
@@ -329,7 +458,7 @@ void MissionTimer::Render(SURFHANDLE surf, SURFHANDLE digits, bool csm, int TexM
 
 void MissionTimer::Render90(SURFHANDLE surf, SURFHANDLE digits, bool csm, int TexMul)
 {
-	if (!IsPowered() || !IsDisplayPowered())
+	if (!IsPoweredForDisplay() || !IsDisplayPoweredForDisplay())
 		return;
 
 	const int DigitWidth = 23 * TexMul;
@@ -337,7 +466,7 @@ void MissionTimer::Render90(SURFHANDLE surf, SURFHANDLE digits, bool csm, int Te
 	int Curdigit, divisor;
 
 	// Display tuning fork symbol if CTE (CM) or PCMTE (LM) reference is lost, and we're operating on internal frequency
-	if (!externalTimingEquipment->TimingSignal()) {
+	if (!HasTimingSignalForDisplay()) {
 		oapiBlt(surf, digits, 0, 0, 0, (int)(DigitHeight * 13.33), DigitWidth, DigitHeight / 2);
 	}
 
@@ -469,7 +598,7 @@ void LEMEventTimer::CountingThroughZero(double &t)
 	}
 }
 
-EventTimer::EventTimer(PanelSDK &p) : MissionTimer(p)
+EventTimer::EventTimer(PanelSDK &p, const char *instanceKey) : MissionTimer(p, instanceKey)
 {
 
 }
