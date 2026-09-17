@@ -3,12 +3,22 @@
 #include "nasspmp_api.h"
 #include "replication/ReplicationHub.h"
 
+#include <algorithm>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace api = nasspmp_api::replication;
 
 namespace
 {
+void CopyKey(char *destination, std::size_t capacity, const std::string &source)
+{
+	const std::size_t length = std::min(capacity - 1, source.size());
+	std::memcpy(destination, source.data(), length);
+	destination[length] = '\0';
+}
+
 // Converts a provider validation result into a stable ABI result value.
 api::Result ToApiResult(ProviderResult result)
 {
@@ -109,6 +119,8 @@ void NasspReplicationBridge::ReadCatalog(ReplicationHub &hub, void *context)
 		for (const ReplicationCatalogGroup &group : component.groups) {
 			api::ReplicationGroupDescriptor &descriptor = output[outputIndex++];
 			descriptor = {};
+			CopyKey(descriptor.componentKey, sizeof(descriptor.componentKey), component.key);
+			CopyKey(descriptor.groupKey, sizeof(descriptor.groupKey), group.key);
 			descriptor.componentId = component.id;
 			descriptor.groupId = group.id;
 			descriptor.delivery = group.descriptor.delivery;

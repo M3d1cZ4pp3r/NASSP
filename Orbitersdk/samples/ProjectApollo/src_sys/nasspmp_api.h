@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -10,7 +11,8 @@ namespace nasspmp_api
 constexpr int MessageId = 0x4E4D5001;
 namespace replication
 {
-constexpr int Version = 8;
+constexpr int Version = 9;
+constexpr std::size_t ReplicationKeyCapacity = 64;
 
 using ComponentId = std::uint32_t;
 using ReplicationGroupId = std::uint32_t;
@@ -69,6 +71,9 @@ union ReplicationBufferPointer
 
 struct ReplicationGroupDescriptor
 {
+	// Human-readable stable keys used by diagnostics; compact IDs remain the wire route.
+	char componentKey[ReplicationKeyCapacity];
+	char groupKey[ReplicationKeyCapacity];
 	// Compact component route valid for the sealed schema only.
 	std::uint32_t componentId;
 	// Compact group route valid within componentId only.
