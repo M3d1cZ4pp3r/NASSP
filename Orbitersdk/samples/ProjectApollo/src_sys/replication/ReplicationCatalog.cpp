@@ -35,9 +35,8 @@ std::uint64_t HashUint32(std::uint64_t hash, std::uint32_t value)
 bool IsValidDescriptor(const ReplicationGroupDescriptor &descriptor)
 {
 	const bool validDelivery = descriptor.delivery == ReplicationDelivery::Reliable || descriptor.delivery == ReplicationDelivery::Unreliable;
-	const bool validPrediction = descriptor.prediction == PredictionMode::Off || descriptor.prediction == PredictionMode::On;
 	const bool unreliableCanRecover = descriptor.delivery != ReplicationDelivery::Unreliable || descriptor.periodicIntervalMs != 0;
-	return descriptor.schemaId && descriptor.maximumPayloadBytes && validDelivery && validPrediction && unreliableCanRecover;
+	return descriptor.schemaId && descriptor.maximumPayloadBytes && validDelivery && unreliableCanRecover;
 }
 } // namespace
 
@@ -132,7 +131,6 @@ ReplicationCatalog::BuildResult ReplicationCatalog::Build(const std::vector<IRep
 			schema.AddString(group.key.c_str());
 			schema.AddUint64(group.descriptor.schemaId);
 			schema.AddUint32(static_cast<std::uint32_t>(group.descriptor.delivery));
-			schema.AddUint32(static_cast<std::uint32_t>(group.descriptor.prediction));
 			schema.AddUint32(group.descriptor.clientReplicates ? 1 : 0);
 			schema.AddUint32(group.descriptor.replicateChanges ? 1 : 0);
 			schema.AddUint32(group.descriptor.maximumPayloadBytes);

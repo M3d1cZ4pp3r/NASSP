@@ -9,7 +9,6 @@ using ReplicationGroupId = nasspmp_api::replication::ReplicationGroupId;
 using Revision = nasspmp_api::replication::Revision;
 using SimulationTick = nasspmp_api::replication::SimulationTick;
 using ReplicationDelivery = nasspmp_api::replication::ReplicationDelivery;
-using PredictionMode = nasspmp_api::replication::PredictionMode;
 using ReplicationRole = nasspmp_api::replication::ReplicationRole;
 using ApplyPurpose = nasspmp_api::replication::ApplyPurpose;
 
@@ -37,8 +36,6 @@ struct ReplicationGroupDescriptor
 	std::uint64_t schemaId = 0;
 	// Controls whether updates must arrive reliably or may replace older samples.
 	ReplicationDelivery delivery = ReplicationDelivery::Reliable;
-	// Declares whether the future client pipeline predicts between authority samples.
-	PredictionMode prediction = PredictionMode::Off;
 	// Allows a replica to send locally captured changes to the authority.
 	bool clientReplicates = false;
 	// Sends a fresh sample at this interval; zero disables periodic transmission.
@@ -65,6 +62,8 @@ struct ApplyContext
 	ApplyPurpose purpose = ApplyPurpose::Baseline;
 	// Carries the authority simulator frame without exposing network identity.
 	SimulationTick serverTick = 0;
+	// Estimates sample age without requiring synchronized process clocks.
+	std::uint32_t estimatedMessageAgeMs = 0;
 };
 
 class ReplicationWriter

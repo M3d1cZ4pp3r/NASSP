@@ -26,7 +26,10 @@
 #define _PA_CONNECTOR_H
 
 #include "nasspmp_api.h"
+#include "replication/KinematicPrediction.h"
 #include "replication/ReplicationHub.h"
+
+#include <chrono>
 
 ///
 /// \ingroup Connectors
@@ -267,7 +270,7 @@ private:
 /// \ingroup Connectors
 ///
 
-class ProjectApolloConnectorVessel : public VESSEL4
+class ProjectApolloConnectorVessel : public VESSEL4, public IReplicationProvider
 {
 public:
 
@@ -309,12 +312,35 @@ public:
 	///
 	bool ValidateVessel();
 
-	// Returns whether this vessel's canonical hub role is Replica.
+	///
+	/// \brief Returns whether this vessel's replication hub role is Replica.
+	/// \return True if replica
+	///
 	bool IsMultiplayerReplica() const { return ReplicationHubInstance.GetRole() == ReplicationRole::Replica; }
 
-	// Returns the non-owning provider hub for this vessel entity.
+	///
+	/// \brief Retrieve the replication hub for this vessel
+	/// \return Reference to replication hub
+	///
 	ReplicationHub &GetReplicationHub() { return ReplicationHubInstance; }
 	const ReplicationHub &GetReplicationHub() const { return ReplicationHubInstance; }
+
+	///
+	/// This function interpolates position and orientation between host updates based on their derivatives.
+	/// Additionally it extrapolates an update based on the assumed message delay.
+	/// \brief If vessel is a replica, this applies its predicted kinematic state before Orbiter physics
+	/// \param simdt Orbiter integration interval following this call
+	///
+	void UpdateReplicatedKinematics(double simdt);
+
+
+	/// Provider block
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	///
 	/// \brief Set up connectors on docking.
@@ -350,6 +376,60 @@ protected:
 #define PACV_N_CONNECTORS 16
 
 	ConnectorDefinition ConnectorList[PACV_N_CONNECTORS];
+
+	struct ReplicatedKinematics
+	{
+		// Motion is predicted from this immutable authority sample.
+		nasspmp_kinematics::State state;
+
+		// Orbiter needs a separate surface representation for landed vessels.
+		VECTOR3 landedOrientation = {};
+		double surfaceLongitude = 0.0;
+		double surfaceLatitude = 0.0;
+		double surfaceHeading = 0.0;
+		double landedAltitude = 0.0;
+		std::uint8_t flightStatus = 0;
+		SimulationTick serverTick = 0;
+		double authorityTimeScale = 1.0;
+		double messageAgeSeconds = 0.0;
+		std::chrono::steady_clock::time_point receivedAt;
+	};
+
+	ProviderResult ReadKinematics(const ReplicationReader &reader, ReplicatedKinematics *target, const ApplyContext &context) const;
+	nasspmp_kinematics::State CurrentKinematicState() const;
+	nasspmp_kinematics::State CurrentKinematicState(const VESSELSTATUS2 &status) const;
+	void ApplyFreeFlightState(const nasspmp_kinematics::State &state);
+	void ApplyLandedState(const ReplicatedKinematics &state);
+
+	ReplicatedKinematics replicatedKinematics;
+
+	// If there was done a replication already and we have a valid authoritative state
+	bool hasReplicatedKinematics = false;
+
+	// Interpolation of a received position/orientation update active
+	bool correctionActive = false;
+
+	// If the current landed state was already applied. Application of the landing state is a one-shot event
+	bool landedStateApplied = false;
+
+	// Targets for correction
+	VECTOR3 positionCorrection = {};
+	nasspmp_kinematics::Quaternion orientationCorrection;
+
+	// Starting point of correction
+	std::chrono::steady_clock::time_point correctionStart;
+
+	// Consecutive authority velocities provide an acceleration sample derived
+	// from Orbiter's actual propagation instead of a competing gravity model.
+	bool hasAuthorityVelocitySample = false;
+	SimulationTick authorityVelocitySampleTick = 0;
+	VECTOR3 authorityVelocitySample = {};
+	VECTOR3 authorityAccelerationSample = {};
+
+	// Measures the acceleration applied by Orbiter between two replica PreStep calls.
+	bool hasReplicaIntegrationSample = false;
+	VECTOR3 replicaIntegrationStartVelocity = {};
+	double replicaIntegrationStepSeconds = 0.0;
 
 	// Owns the registration and role boundary for this replicated vessel entity.
 	ReplicationHub ReplicationHubInstance;

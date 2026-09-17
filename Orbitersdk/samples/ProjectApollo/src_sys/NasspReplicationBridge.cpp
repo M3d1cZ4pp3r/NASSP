@@ -112,7 +112,6 @@ void NasspReplicationBridge::ReadCatalog(ReplicationHub &hub, void *context)
 			descriptor.componentId = component.id;
 			descriptor.groupId = group.id;
 			descriptor.delivery = group.descriptor.delivery;
-			descriptor.prediction = group.descriptor.prediction;
 			descriptor.clientReplicates = group.descriptor.clientReplicates ? 1 : 0;
 			descriptor.periodicIntervalMs = group.descriptor.periodicIntervalMs;
 			descriptor.replicateChanges = group.descriptor.replicateChanges ? 1 : 0;
@@ -228,5 +227,6 @@ void NasspReplicationBridge::ApplyBatch(ReplicationHub &hub, void *context)
 	ApplyContext applyContext;
 	applyContext.purpose = request->applyPurpose;
 	applyContext.serverTick = request->serverTick;
+	applyContext.estimatedMessageAgeMs = request->estimatedMessageAgeMs;
 	request->result = ToApiResult(hub.ApplyBatch(items, applyContext));
 }

@@ -1200,6 +1200,7 @@ void Saturn::RegisterReplicationProviders()
 {
 	ReplicationHub &hub = GetReplicationHub();
 	IReplicationProvider *const providers[] = {
+		this,
 		&panelControlProvider,
 		&cws,
 		&lightingProvider,
@@ -1538,6 +1539,7 @@ void Saturn::clbkPreStep(double simt, double simdt, double mjd)
 	sprintf(buffer, "MissionTime %f, simt %f, simdt %f, time(0) %lld", MissionTime, simt, simdt, time(0)); 
 	TRACE(buffer);
 
+	UpdateReplicatedKinematics(simdt);
 	SetAnimations(simdt);
 //	UpdatePointingArrow();
 //	InitFDAICustomCamera();

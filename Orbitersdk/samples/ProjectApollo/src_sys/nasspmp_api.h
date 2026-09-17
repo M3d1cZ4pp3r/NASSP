@@ -10,7 +10,7 @@ namespace nasspmp_api
 constexpr int MessageId = 0x4E4D5001;
 namespace replication
 {
-constexpr int Version = 6;
+constexpr int Version = 8;
 
 using ComponentId = std::uint32_t;
 using ReplicationGroupId = std::uint32_t;
@@ -57,7 +57,6 @@ enum class Result : std::uint32_t
 
 enum class ReplicationRole : std::uint32_t { Standalone = 0, Authority = 1, Replica = 2 };
 enum class ReplicationDelivery : std::uint32_t { Reliable = 0, Unreliable = 1 };
-enum class PredictionMode : std::uint32_t { Off = 0, On = 1 };
 enum class ApplyPurpose : std::uint32_t { Baseline = 0, AuthoritativeUpdate = 1, RemoteInput = 2 };
 
 // Shares one ABI pointer slot between mutually exclusive output and input operations.
@@ -76,8 +75,6 @@ struct ReplicationGroupDescriptor
 	std::uint32_t groupId;
 	// Selects ordered delivery or replaceable latest-state delivery.
 	ReplicationDelivery delivery;
-	// Declares the prediction policy; On is reserved for the future prediction pipeline.
-	PredictionMode prediction;
 	// Allows replicas to capture and send this group back to the authority.
 	std::uint32_t clientReplicates;
 	// Sends the current value at this interval; zero disables periodic transmission.
@@ -118,6 +115,8 @@ struct Request
 	std::uint64_t revision = 0;
 	// Associates a capture or apply with an authority simulation frame.
 	std::uint64_t serverTick = 0;
+	// Estimates how old an applied authority sample is at the client.
+	std::uint32_t estimatedMessageAgeMs = 0;
 	// Selects a component for single-group requests.
 	std::uint32_t componentId = 0;
 	// Selects a component-local group for single-group requests.
