@@ -532,16 +532,7 @@ void SPSEngine::Timestep(double simt, double simdt) {
 	if (!saturn) return;
 
 	// Animate SPS Gimbals
-	if (saturn->GetStage() == CSM_LEM_STAGE) {
-		spsgimbal_proc[0] = -pitchGimbalActuator.GetPosition() / 360;
-		if (spsgimbal_proc[0] < 0) spsgimbal_proc[0] += 1.0;
-		spsgimbal_proc[1] = yawGimbalActuator.GetPosition() / 360;
-		if (spsgimbal_proc[1] < 0) spsgimbal_proc[1] += 1.0;
-		if (spsgimbal_proc[0] - spsgimbal_proc_last[0] != 0.0) saturn->SetAnimation(anim_SPSGimbalPitch, spsgimbal_proc[0]);
-		if (spsgimbal_proc[1] - spsgimbal_proc_last[1] != 0.0) saturn->SetAnimation(anim_SPSGimbalYaw, spsgimbal_proc[1]);
-		spsgimbal_proc_last[0] = spsgimbal_proc[0];
-		spsgimbal_proc_last[1] = spsgimbal_proc[1];
-	}
+	UpdateGimbalAnimation(pitchGimbalActuator.GetPosition(), yawGimbalActuator.GetPosition());
 
 
 	// Prevalves
@@ -725,17 +716,47 @@ void SPSEngine::Timestep(double simt, double simdt) {
 	pitchGimbalActuator.Timestep(simdt);
 	yawGimbalActuator.Timestep(simdt);
 
-	if (saturn->GetStage() == CSM_LEM_STAGE && spsThruster) {
-		// Directions X,Y,Z = YAW (+ = left),PITCH (+ = DOWN),FORE/AFT
-		VECTOR3 spsvector;
-		spsvector.x = (yawGimbalActuator.GetPosition() + SPS_YAW_OFFSET) * RAD; // Convert deg to rad
-		spsvector.y = (pitchGimbalActuator.GetPosition() + SPS_PITCH_OFFSET) * RAD;
-		spsvector.z = 1;
-		spsvector = unit(spsvector);
-		saturn->SetThrusterDir(spsThruster, spsvector);
+	SetGimbalDirection(pitchGimbalActuator.GetPosition(), yawGimbalActuator.GetPosition());
 
-		//sprintf(oapiDebugString(), "%lf %lf", pitchGimbalActuator.GetPosition(), yawGimbalActuator.GetPosition());
-	}
+	//sprintf(oapiDebugString(), "%lf %lf", pitchGimbalActuator.GetPosition(), yawGimbalActuator.GetPosition());
+}
+
+void SPSEngine::SetGimbalPresentation(double pitchPosition, double yawPosition)
+{
+	UpdateGimbalAnimation(pitchPosition, yawPosition);
+	SetGimbalDirection(pitchPosition, yawPosition);
+}
+
+void SPSEngine::UpdateGimbalAnimation(double pitchPosition, double yawPosition)
+{
+	if (!saturn || saturn->GetStage() != CSM_LEM_STAGE)
+		return;
+
+	spsgimbal_proc[0] = -pitchPosition / 360.0;
+	if (spsgimbal_proc[0] < 0.0)
+		spsgimbal_proc[0] += 1.0;
+	spsgimbal_proc[1] = yawPosition / 360.0;
+	if (spsgimbal_proc[1] < 0.0)
+		spsgimbal_proc[1] += 1.0;
+	if (anim_SPSGimbalPitch != -1 && spsgimbal_proc[0] - spsgimbal_proc_last[0] != 0.0)
+		saturn->SetAnimation(anim_SPSGimbalPitch, spsgimbal_proc[0]);
+	if (anim_SPSGimbalYaw != -1 && spsgimbal_proc[1] - spsgimbal_proc_last[1] != 0.0)
+		saturn->SetAnimation(anim_SPSGimbalYaw, spsgimbal_proc[1]);
+	spsgimbal_proc_last[0] = spsgimbal_proc[0];
+	spsgimbal_proc_last[1] = spsgimbal_proc[1];
+}
+
+void SPSEngine::SetGimbalDirection(double pitchPosition, double yawPosition)
+{
+	if (!saturn || saturn->GetStage() != CSM_LEM_STAGE || !spsThruster)
+		return;
+
+	// Directions X,Y,Z = YAW (+ = left), PITCH (+ = down), FORE/AFT.
+	VECTOR3 spsvector;
+	spsvector.x = (yawPosition + SPS_YAW_OFFSET) * RAD;
+	spsvector.y = (pitchPosition + SPS_PITCH_OFFSET) * RAD;
+	spsvector.z = 1.0;
+	saturn->SetThrusterDir(spsThruster, unit(spsvector));
 }
 
 double SPSEngine::SPSThrustOnDelayDual(double t)
@@ -855,14 +876,7 @@ void SPSEngine::clbkPostCreation() {
 	if (saturn->GetStage() != CSM_LEM_STAGE) return;
 
 	// Get current SPS gimbal state for animation
-	spsgimbal_proc[0] = -pitchGimbalActuator.GetPosition() / 360;
-	if (spsgimbal_proc[0] < 0) spsgimbal_proc[0] += 1.0;
-	spsgimbal_proc[1] = yawGimbalActuator.GetPosition() / 360;
-	if (spsgimbal_proc[1] < 0) spsgimbal_proc[1] += 1.0;
-	if (spsgimbal_proc[0] - spsgimbal_proc_last[0] != 0.0) saturn->SetAnimation(anim_SPSGimbalPitch, spsgimbal_proc[0]);
-	if (spsgimbal_proc[1] - spsgimbal_proc_last[1] != 0.0) saturn->SetAnimation(anim_SPSGimbalYaw, spsgimbal_proc[1]);
-	spsgimbal_proc_last[0] = spsgimbal_proc[0];
-	spsgimbal_proc_last[1] = spsgimbal_proc[1];
+	UpdateGimbalAnimation(pitchGimbalActuator.GetPosition(), yawGimbalActuator.GetPosition());
 }
 
 void SPSEngine::SaveState(FILEHANDLE scn) {

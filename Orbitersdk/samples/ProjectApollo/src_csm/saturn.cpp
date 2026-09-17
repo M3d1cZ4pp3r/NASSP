@@ -55,6 +55,9 @@
 
 #include "eva.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <crtdbg.h>
 
 extern "C" {
@@ -73,6 +76,57 @@ extern "C" {
 }
 
 using namespace nassp;
+
+namespace
+{
+const char *ExternalPropulsionGroupKey = "propulsion";
+
+std::uint8_t EncodeThrusterLevel(Saturn &saturn, THRUSTER_HANDLE thruster)
+{
+	if (!thruster)
+		return 0;
+	const double level = saturn.GetThrusterLevel(thruster);
+	const double boundedLevel = (std::max)(0.0, (std::min)(1.0, level));
+	return static_cast<std::uint8_t>(std::lround(boundedLevel * 255.0));
+}
+
+void CaptureThrusterLevels(Saturn &saturn, THRUSTER_HANDLE const *thrusters, std::uint8_t *levels, unsigned int count)
+{
+	for (unsigned int index = 0; index < count; index++)
+		levels[index] = EncodeThrusterLevel(saturn, thrusters[index]);
+}
+
+void SetThrusterLevels(Saturn &saturn, THRUSTER_HANDLE const *thrusters, const std::uint8_t *levels, unsigned int count, bool clearLevels)
+{
+	for (unsigned int index = 0; index < count; index++) {
+		if (thrusters[index])
+			saturn.SetThrusterLevel(thrusters[index], clearLevels ? 0.0 : levels[index] / 255.0);
+	}
+}
+
+void SetThrusterResources(Saturn &saturn, THRUSTER_HANDLE const *thrusters, unsigned int count, PROPELLANT_HANDLE resource)
+{
+	for (unsigned int index = 0; index < count; index++) {
+		if (thrusters[index])
+			saturn.SetThrusterResource(thrusters[index], resource);
+	}
+}
+
+template<unsigned int Count>
+void WriteThrusterLevels(ReplicationWriter &writer, const std::uint8_t (&levels)[Count])
+{
+	for (unsigned int index = 0; index < Count; index++)
+		writer.WriteScalar(levels[index], 8);
+}
+
+template<unsigned int Count>
+void ReadThrusterLevels(const ReplicationReader &reader, std::uint8_t (&levels)[Count])
+{
+	for (unsigned int index = 0; index < Count; index++)
+		reader.ReadScalar(levels[index], 8);
+}
+
+}
 
 //extern FILE *PanelsdkLogFile;
 
@@ -1196,6 +1250,218 @@ void Saturn::initSaturn()
 	InitSaturnCalled = true;
 }
 
+const char *Saturn::ComponentKey() const
+{
+	return "vessel.saturn";
+}
+
+ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	const ProviderResult baseResult = ProjectApolloConnectorVessel::Describe(catalog);
+	if (baseResult != ProviderResult::Success)
+		return baseResult;
+
+	ReplicationSchemaBuilder schema;
+	schema.AddString("saturn-external-propulsion-v1");
+	schema.AddString("sm_rcs:uint8x16");
+	schema.AddString("cm_rcs:uint8x12");
+	schema.AddString("sps:uint8");
+	schema.AddString("sps_gimbal_degrees:float32x2");
+	schema.AddString("first_stage:uint8x8");
+	schema.AddString("second_stage:uint8x5");
+	schema.AddString("third_stage:uint8");
+	schema.AddString("ullage:uint8x8");
+	schema.AddString("vernier:uint8x3");
+	schema.AddString("aps:uint8x6");
+	schema.AddString("aps_ullage:uint8x2");
+	schema.AddString("separation:uint8x16");
+	schema.AddString("les:uint8x4");
+	schema.AddString("pitch_control_motor:uint8");
+
+	ReplicationGroupDescriptor presentation;
+	presentation.key = ExternalPropulsionGroupKey;
+	presentation.schemaId = schema.SchemaId();
+	presentation.delivery = ReplicationDelivery::Unreliable;
+	presentation.periodicIntervalMs = 50;
+	presentation.replicateChanges = false;
+	presentation.maximumPayloadBytes = ThrusterLevelCount + 2 * sizeof(float);
+	catalog.AddGroup(presentation);
+	return ProviderResult::Success;
+}
+
+void Saturn::CaptureExternalVisualPresentation(ExternalVisualPresentation &target)
+{
+	CaptureThrusterLevels(*this, th_rcs_a + 1, target.smRcs, 4);
+	CaptureThrusterLevels(*this, th_rcs_b + 1, target.smRcs + 4, 4);
+	CaptureThrusterLevels(*this, th_rcs_c + 1, target.smRcs + 8, 4);
+	CaptureThrusterLevels(*this, th_rcs_d + 1, target.smRcs + 12, 4);
+	CaptureThrusterLevels(*this, th_att_cm, target.cmRcs, CmRcsThrusterCount);
+	target.sps = EncodeThrusterLevel(*this, th_sps[0]);
+	target.spsPitch = static_cast<float>(GetSPSEngine()->pitchGimbalActuator.GetPosition());
+	target.spsYaw = static_cast<float>(GetSPSEngine()->yawGimbalActuator.GetPosition());
+	CaptureThrusterLevels(*this, th_1st, target.firstStage, FirstStageThrusterCount);
+	CaptureThrusterLevels(*this, th_2nd, target.secondStage, SecondStageThrusterCount);
+	target.thirdStage = EncodeThrusterLevel(*this, th_3rd[0]);
+	CaptureThrusterLevels(*this, th_ull, target.ullage, UllageThrusterCount);
+	CaptureThrusterLevels(*this, th_ver, target.vernier, VernierThrusterCount);
+	CaptureThrusterLevels(*this, th_aps_rot, target.aps, ApsThrusterCount);
+	CaptureThrusterLevels(*this, th_aps_ull, target.apsUllage, ApsUllageThrusterCount);
+	CaptureThrusterLevels(*this, th_sep, target.separation, SeparationThrusterCount);
+	CaptureThrusterLevels(*this, th_sep2, target.separation2, SeparationThrusterCount);
+	CaptureThrusterLevels(*this, th_lem, target.les, LesThrusterCount);
+	target.pitchControlMotor = EncodeThrusterLevel(*this, th_pcm);
+}
+
+ProviderResult Saturn::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context)
+{
+	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0)
+		return ProjectApolloConnectorVessel::Capture(groupKey, writer, context);
+
+	ExternalVisualPresentation presentation;
+	CaptureExternalVisualPresentation(presentation);
+	WriteThrusterLevels(writer, presentation.smRcs);
+	WriteThrusterLevels(writer, presentation.cmRcs);
+	writer.WriteScalar(presentation.sps, 8)
+		.WriteScalar(presentation.spsPitch)
+		.WriteScalar(presentation.spsYaw);
+	WriteThrusterLevels(writer, presentation.firstStage);
+	WriteThrusterLevels(writer, presentation.secondStage);
+	writer.WriteScalar(presentation.thirdStage, 8);
+	WriteThrusterLevels(writer, presentation.ullage);
+	WriteThrusterLevels(writer, presentation.vernier);
+	WriteThrusterLevels(writer, presentation.aps);
+	WriteThrusterLevels(writer, presentation.apsUllage);
+	WriteThrusterLevels(writer, presentation.separation);
+	WriteThrusterLevels(writer, presentation.separation2);
+	WriteThrusterLevels(writer, presentation.les);
+	writer.WriteScalar(presentation.pitchControlMotor, 8);
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+}
+
+ProviderResult Saturn::ReadExternalVisualPresentation(const ReplicationReader &reader, ExternalVisualPresentation *target) const
+{
+	ExternalVisualPresentation decoded;
+	ReadThrusterLevels(reader, decoded.smRcs);
+	ReadThrusterLevels(reader, decoded.cmRcs);
+	reader.ReadScalar(decoded.sps, 8)
+		.ReadScalar(decoded.spsPitch)
+		.ReadScalar(decoded.spsYaw);
+	ReadThrusterLevels(reader, decoded.firstStage);
+	ReadThrusterLevels(reader, decoded.secondStage);
+	reader.ReadScalar(decoded.thirdStage, 8);
+	ReadThrusterLevels(reader, decoded.ullage);
+	ReadThrusterLevels(reader, decoded.vernier);
+	ReadThrusterLevels(reader, decoded.aps);
+	ReadThrusterLevels(reader, decoded.apsUllage);
+	ReadThrusterLevels(reader, decoded.separation);
+	ReadThrusterLevels(reader, decoded.separation2);
+	ReadThrusterLevels(reader, decoded.les);
+	reader.ReadScalar(decoded.pitchControlMotor, 8);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (!std::isfinite(decoded.spsPitch) || !std::isfinite(decoded.spsYaw) ||
+		decoded.spsPitch < -4.5f || decoded.spsPitch > 4.5f || decoded.spsYaw < -4.5f || decoded.spsYaw > 4.5f)
+		return ProviderResult::Rejected;
+
+	if (target)
+		*target = decoded;
+	return ProviderResult::Success;
+}
+
+ProviderResult Saturn::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
+{
+	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0)
+		return ProjectApolloConnectorVessel::Validate(groupKey, reader, context);
+	if (context.purpose == ApplyPurpose::RemoteInput)
+		return ProviderResult::Unsupported;
+	return ReadExternalVisualPresentation(reader, NULL);
+}
+
+void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
+{
+	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0) {
+		ProjectApolloConnectorVessel::Apply(groupKey, reader, context);
+		return;
+	}
+	if (context.purpose == ApplyPurpose::RemoteInput)
+		return;
+	ReadExternalVisualPresentation(reader, &*replicatedExternalVisuals);
+}
+
+void Saturn::ApplyExternalVisualPresentation(const ExternalVisualPresentation &presentation, ThrusterPresentationMode mode)
+{
+	const bool clearLevels = mode == ThrusterPresentationMode::ClearForPhysics;
+	SetThrusterLevels(*this, th_rcs_a + 1, presentation.smRcs, 4, clearLevels);
+	SetThrusterLevels(*this, th_rcs_b + 1, presentation.smRcs + 4, 4, clearLevels);
+	SetThrusterLevels(*this, th_rcs_c + 1, presentation.smRcs + 8, 4, clearLevels);
+	SetThrusterLevels(*this, th_rcs_d + 1, presentation.smRcs + 12, 4, clearLevels);
+	SetThrusterLevels(*this, th_att_cm, presentation.cmRcs, CmRcsThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_sps, &presentation.sps, 1, clearLevels);
+	SetThrusterLevels(*this, th_1st, presentation.firstStage, FirstStageThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_2nd, presentation.secondStage, SecondStageThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_3rd, &presentation.thirdStage, 1, clearLevels);
+	SetThrusterLevels(*this, th_ull, presentation.ullage, UllageThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_ver, presentation.vernier, VernierThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_aps_rot, presentation.aps, ApsThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_aps_ull, presentation.apsUllage, ApsUllageThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_sep, presentation.separation, SeparationThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_sep2, presentation.separation2, SeparationThrusterCount, clearLevels);
+	SetThrusterLevels(*this, th_lem, presentation.les, LesThrusterCount, clearLevels);
+	SetThrusterLevels(*this, &th_pcm, &presentation.pitchControlMotor, 1, clearLevels);
+	if (!clearLevels)
+		GetSPSEngine()->SetGimbalPresentation(presentation.spsPitch, presentation.spsYaw);
+}
+
+void Saturn::AssignReplicaThrusterResource()
+{
+	if (!replicaThrusterResource)
+		replicaThrusterResource = CreatePropellantResource(1.0, 1.0);
+	if (!replicaThrusterResource)
+		return;
+
+	// The CSM propulsion system timestep is disabled for replicas. This shared resource
+	// remains attached while the replicated levels are cleared before Orbiter physics.
+	SetThrusterResources(*this, th_rcs_a + 1, 4, replicaThrusterResource);
+	SetThrusterResources(*this, th_rcs_b + 1, 4, replicaThrusterResource);
+	SetThrusterResources(*this, th_rcs_c + 1, 4, replicaThrusterResource);
+	SetThrusterResources(*this, th_rcs_d + 1, 4, replicaThrusterResource);
+	SetThrusterResources(*this, th_att_cm, CmRcsThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_sps, 1, replicaThrusterResource);
+	SetThrusterResources(*this, th_1st, FirstStageThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_2nd, SecondStageThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_3rd, 1, replicaThrusterResource);
+	SetThrusterResources(*this, th_ull, UllageThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_ver, VernierThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_aps_rot, ApsThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_aps_ull, ApsUllageThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_sep, SeparationThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_sep2, SeparationThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, th_lem, LesThrusterCount, replicaThrusterResource);
+	SetThrusterResources(*this, &th_pcm, 1, replicaThrusterResource);
+}
+
+void Saturn::ClearReplicaThrusterLevels()
+{
+	if (replicatedExternalVisuals.IsActive())
+		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::ClearForPhysics);
+}
+
+void Saturn::PresentReplicaState()
+{
+	if (replicatedExternalVisuals.IsActive())
+		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::Render);
+}
+
+void Saturn::OnRoleChanged(ReplicationRole role)
+{
+	ProjectApolloConnectorVessel::OnRoleChanged(role);
+	if (replicatedExternalVisuals.IsActive() && role != ReplicationRole::Replica)
+		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::ClearForPhysics);
+	if (role == ReplicationRole::Replica)
+		AssignReplicaThrusterResource();
+	replicatedExternalVisuals.SetActive(role == ReplicationRole::Replica);
+}
+
 void Saturn::RegisterReplicationProviders()
 {
 	ReplicationHub &hub = GetReplicationHub();
@@ -1540,6 +1806,8 @@ void Saturn::clbkPreStep(double simt, double simdt, double mjd)
 	sprintf(buffer, "MissionTime %f, simt %f, simdt %f, time(0) %lld", MissionTime, simt, simdt, time(0)); 
 	TRACE(buffer);
 
+	// Remove last frame's replicated exhaust before local replica calculations.
+	ClearReplicaThrusterLevels();
 	UpdateReplicatedKinematics(simdt);
 	SetAnimations(simdt);
 //	UpdatePointingArrow();
@@ -1597,6 +1865,8 @@ void Saturn::clbkPreStep(double simt, double simdt, double mjd)
 	//
 
 	Timestep(simt, simdt, mjd);
+	// Clear replica-only exhaust levels after subclass systems and before Orbiter physics.
+	ClearReplicaThrusterLevels();
 
 	if (oapiGetFocusObject() == GetHandle()) {
 		dsky.SendNetworkPacketDSKY();
@@ -1667,7 +1937,9 @@ void Saturn::clbkPostStep(double simt, double simdt, double mjd)
 		sprintf(oapiDebugString(), "The scenario you are using is too old (Scenario: %d, NASSP: %d). Please go here for more info: https://nassp.space/index.php/Scenario_File_Updates", nasspver, NASSP_VERSION);
 	}
 
-	sprintf(buffer, "End time(0) %lld", time(0)); 
+	PresentReplicaState();
+
+	sprintf(buffer, "End time(0) %lld", time(0));
 	TRACE(buffer);
 }
 
@@ -3212,6 +3484,8 @@ void Saturn::SetStage(int s)
 		iuCommandConnector.Disconnect();
 		sivbCommandConnector.Disconnect();
 	}
+	if (replicatedExternalVisuals.IsActive())
+		AssignReplicaThrusterResource();
 }
 
 void Saturn::GenericTimestep(double simt, double simdt, double mjd)
@@ -4247,6 +4521,8 @@ void Saturn::AddRCS_S4B()
 		AddExhaust(th_aps_ull[0], 7, 0.15, SIVBRCSTex);
 		AddExhaust(th_aps_ull[1], 7, 0.15, SIVBRCSTex);
 	}
+	if (replicatedExternalVisuals.IsActive())
+		AssignReplicaThrusterResource();
 }
 
 void Saturn::FireSeperationThrusters(THRUSTER_HANDLE *pth)
@@ -4617,6 +4893,7 @@ void Saturn::ClearPropellants()
 
 {
 	ClearPropellantResources();
+	replicaThrusterResource = NULL;
 
 	//
 	// Zero everything.

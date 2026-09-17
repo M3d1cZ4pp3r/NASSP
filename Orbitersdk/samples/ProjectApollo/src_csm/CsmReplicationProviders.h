@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+
 class PanelSwitchItem;
 class PanelSwitchScenarioHandler;
 class FloodLights;

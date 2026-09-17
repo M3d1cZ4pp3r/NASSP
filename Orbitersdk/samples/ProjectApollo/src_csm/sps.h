@@ -141,12 +141,16 @@ public:
 	void SaveState(FILEHANDLE scn);
 	void LoadState(FILEHANDLE scn);
 	void clbkPostCreation();
+	void SetGimbalPresentation(double pitchPosition, double yawPosition);
 
 	SPSGimbalActuator pitchGimbalActuator;
 	SPSGimbalActuator yawGimbalActuator;
 	h_HeatLoad *spsThrustHeat;
 
 protected:
+	void UpdateGimbalAnimation(double pitchPosition, double yawPosition);
+	void SetGimbalDirection(double pitchPosition, double yawPosition);
+
 	bool thrustOnA, thrustOnB;
 	bool injectorValves12Open;
 	bool injectorValves34Open;

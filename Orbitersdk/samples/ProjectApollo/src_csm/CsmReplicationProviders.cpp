@@ -4,7 +4,6 @@ class SoundLib;
 
 #include "toggleswitch.h"
 #include "eps.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -316,3 +315,4 @@ void CsmLightingProvider::OnRoleChanged(ReplicationRole role)
 	for (NumericLights *lights : numericLights)
 		lights->SetReplicationPresentationActive(presentationActive);
 }
+

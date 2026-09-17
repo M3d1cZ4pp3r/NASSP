@@ -34,6 +34,7 @@
 #include "PanelSDK/PanelSDK.h"
 
 #include "connector.h"
+#include "replication/ReplicaOverrideData.h"
 #include "csmconnector.h"
 #include "cautionwarning.h"
 #include "csmcautionwarning.h"
@@ -943,6 +944,13 @@ public:
 	void clbkPostCreation();
 	void clbkVisualCreated (VISHANDLE vis, int refcount);
 	void clbkVisualDestroyed (VISHANDLE vis, int refcount);
+
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	///
 	/// This function performs all actions required to update the spacecraft state as time
@@ -4544,6 +4552,57 @@ protected:
 	bool th_att_cm_commanded[12];
 	double rhc_keyboard_deflection[6];	// Holds deflection values (0.0 to 1.0) for each Orbiter attitude direction
 
+	enum
+	{
+		SmRcsThrusterCount = 16,
+		CmRcsThrusterCount = 12,
+		FirstStageThrusterCount = 8,
+		SecondStageThrusterCount = 5,
+		UllageThrusterCount = 8,
+		VernierThrusterCount = 3,
+		ApsThrusterCount = 6,
+		ApsUllageThrusterCount = 2,
+		SeparationThrusterCount = 8,
+		LesThrusterCount = 4,
+		ThrusterLevelCount = 83
+	};
+
+	struct ExternalVisualPresentation
+	{
+		std::uint8_t smRcs[SmRcsThrusterCount];
+		std::uint8_t cmRcs[CmRcsThrusterCount];
+		std::uint8_t sps;
+		float spsPitch;
+		float spsYaw;
+		std::uint8_t firstStage[FirstStageThrusterCount];
+		std::uint8_t secondStage[SecondStageThrusterCount];
+		std::uint8_t thirdStage;
+		std::uint8_t ullage[UllageThrusterCount];
+		std::uint8_t vernier[VernierThrusterCount];
+		std::uint8_t aps[ApsThrusterCount];
+		std::uint8_t apsUllage[ApsUllageThrusterCount];
+		std::uint8_t separation[SeparationThrusterCount];
+		std::uint8_t separation2[SeparationThrusterCount];
+		std::uint8_t les[LesThrusterCount];
+		std::uint8_t pitchControlMotor;
+	};
+
+	enum class ThrusterPresentationMode
+	{
+		ClearForPhysics,
+		Render
+	};
+
+	void CaptureExternalVisualPresentation(ExternalVisualPresentation &target);
+	ProviderResult ReadExternalVisualPresentation(const ReplicationReader &reader, ExternalVisualPresentation *target) const;
+	void ApplyExternalVisualPresentation(const ExternalVisualPresentation &presentation, ThrusterPresentationMode mode);
+	void AssignReplicaThrusterResource();
+	void ClearReplicaThrusterLevels();
+	void PresentReplicaState();
+
+	ReplicaOverrideData<ExternalVisualPresentation> replicatedExternalVisuals;
+	PROPELLANT_HANDLE replicaThrusterResource = NULL;
+
 	PSTREAM_HANDLE dyemarker;
 	PSTREAM_HANDLE wastewaterdump;
 	PSTREAM_HANDLE urinedump;
@@ -4799,7 +4858,6 @@ protected:
 	friend class IntegralLights;
 	friend class NumericLights;
 	friend class ExteriorLighting;
-
 	friend void cbCSMVesim(int inputID, int eventType, int newValue, void *pdata);
 };
 
