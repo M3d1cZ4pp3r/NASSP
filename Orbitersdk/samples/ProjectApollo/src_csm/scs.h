@@ -206,7 +206,8 @@ protected:
 #define ASCP_START_STRING	"ASCP_BEGIN"
 #define ASCP_END_STRING		"ASCP_END"
 
-class ASCP {
+class ASCP : public IReplicationProvider
+{
 	
 public: // We use these inside a timestep, so everything is public to make data access as fast as possible.
 	ASCP(Sound &clicksound);									   // Cons
@@ -232,6 +233,12 @@ public: // We use these inside a timestep, so everything is public to make data 
 	bool YawClick(int Event, int mx, int my);
 	void SaveState(FILEHANDLE scn);                                // SaveState callback
 	void LoadState(FILEHANDLE scn);                                // LoadState callback
+	const char *ComponentKey() const override;
+	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
+	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
+	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
+	void OnRoleChanged(ReplicationRole role) override;
 
 	double GetRollEulerAttitudeSetError();
 	double GetPitchEulerAttitudeSetError();
@@ -253,10 +260,12 @@ public: // We use these inside a timestep, so everything is public to make data 
 	Sound &ClickSound;
 
 protected:
+	ProviderResult ReadReplication(const ReplicationReader &reader, ASCP *target) const;
 	bool PaintDisplay(SURFHANDLE surf, SURFHANDLE digits, double value, int xTexMul = 1);
 	double CalcRollEulerAttitudeSetError();
 	double CalcPitchEulerAttitudeSetError();
 	double CalcYawEulerAttitudeSetError();
+	bool replicatedPresentationActive = false;
 };
 
 

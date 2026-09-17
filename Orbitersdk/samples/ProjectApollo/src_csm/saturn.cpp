@@ -1206,6 +1206,7 @@ void Saturn::RegisterReplicationProviders()
 		&lightingProvider,
 		&dsky,
 		&dsky2,
+		&ascp,
 		&eda,
 		&fdaiLeft,
 		&fdaiRight,
@@ -3442,6 +3443,8 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 		SystemsTimestep(simt, simdt, mjd);
 	}
 	else {
+		// Keep ASCP mouse hold handling active for replicas.
+		ascp.TimeStep(simdt);
 		// Needed to copy replicated EDA values to display on FDAI
 		FDAITimestep(simt, simdt);
 		ems.ReplicaTimestep(simdt);

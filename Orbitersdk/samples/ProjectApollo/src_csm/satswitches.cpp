@@ -2625,6 +2625,13 @@ bool LeftCOASPowerSwitch::SwitchTo(int newState, bool dontspring)
 	return false;
 }
 
+void LeftCOASPowerSwitch::ApplyReplicatedState(int value)
+{
+	SaturnToggleSwitch::ApplyReplicatedState(value);
+	sat->COASreticlevisible = state == TOGGLESWITCH_UP;
+	sat->SetCOASMesh();
+}
+
 void SaturnAltimeter::Init(SURFHANDLE surf1, SURFHANDLE surf2, Saturn *s) {
 
 	surface1 = surf1;

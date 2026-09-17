@@ -992,6 +992,7 @@ class LeftCOASPowerSwitch : public SaturnToggleSwitch
 {
 public:
 	virtual bool SwitchTo(int newState, bool dontspring = false);
+	void ApplyReplicatedState(int value) override;
 };
 
 class SaturnAltimeter

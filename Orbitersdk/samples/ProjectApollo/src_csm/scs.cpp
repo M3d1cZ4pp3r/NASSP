@@ -1094,6 +1094,28 @@ void GDC::LoadState(FILEHANDLE scn){
 #define ASCP_YAWUP		5
 #define ASCP_YAWDOWN	6
 
+namespace
+{
+const char ASCPControlGroupKey[] = "attitude_set";
+const unsigned int ASCPAngleBitCount = 12;
+const unsigned int ASCPWheelBitCount = 3;
+const std::uint16_t ASCPMaximumAngleValue = 3599;
+const std::uint8_t ASCPMaximumWheelValue = 4;
+const unsigned int ASCPPayloadBytes = 6;
+
+std::uint16_t EncodeASCPAngle(double angle)
+{
+	const long encoded = std::lround(angle * 10.0);
+	return static_cast<std::uint16_t>((std::max)(0L, (std::min)(static_cast<long>(ASCPMaximumAngleValue), encoded)));
+}
+
+std::uint8_t EncodeASCPWheel(double wheel)
+{
+	const int encoded = static_cast<int>(wheel);
+	return static_cast<std::uint8_t>((std::max)(0, (std::min)(static_cast<int>(ASCPMaximumWheelValue), encoded)));
+}
+}
+
 ASCP::ASCP(Sound &clicksound) : ClickSound(clicksound)
 
 {
@@ -1116,6 +1138,93 @@ void ASCP::Init(Saturn *vessel)
 
 {
 	sat = vessel;
+}
+
+const char *ASCP::ComponentKey() const
+{
+	return "csm.ascp";
+}
+
+ProviderResult ASCP::Describe(ReplicationCatalogBuilder &catalog) const
+{
+	ReplicationSchemaBuilder schema;
+	schema.AddString("attitude_degrees_tenths_uint12x3");
+	schema.AddString("wheel_phase_uint3x3");
+
+	ReplicationGroupDescriptor controls;
+	controls.key = ASCPControlGroupKey;
+	controls.schemaId = schema.SchemaId();
+	controls.delivery = ReplicationDelivery::Reliable;
+	controls.clientReplicates = true;
+	controls.replicateChanges = true;
+	controls.maximumPayloadBytes = ASCPPayloadBytes;
+	controls.inputAuthorityHoldMs = 150;
+	catalog.AddGroup(controls);
+	return ProviderResult::Success;
+}
+
+ProviderResult ASCP::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &)
+{
+	if (strcmp(groupKey, ASCPControlGroupKey) != 0)
+		return ProviderResult::Unsupported;
+
+	writer.WriteScalar(EncodeASCPAngle(output.x), ASCPAngleBitCount)
+		.WriteScalar(EncodeASCPAngle(output.y), ASCPAngleBitCount)
+		.WriteScalar(EncodeASCPAngle(output.z), ASCPAngleBitCount)
+		.WriteScalar(EncodeASCPWheel(rolldisplay), ASCPWheelBitCount)
+		.WriteScalar(EncodeASCPWheel(pitchdisplay), ASCPWheelBitCount)
+		.WriteScalar(EncodeASCPWheel(yawdisplay), ASCPWheelBitCount);
+	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+}
+
+ProviderResult ASCP::ReadReplication(const ReplicationReader &reader, ASCP *target) const
+{
+	std::uint16_t roll = 0;
+	std::uint16_t pitch = 0;
+	std::uint16_t yaw = 0;
+	std::uint8_t rollWheel = 0;
+	std::uint8_t pitchWheel = 0;
+	std::uint8_t yawWheel = 0;
+	reader.ReadScalar(roll, ASCPAngleBitCount)
+		.ReadScalar(pitch, ASCPAngleBitCount)
+		.ReadScalar(yaw, ASCPAngleBitCount)
+		.ReadScalar(rollWheel, ASCPWheelBitCount)
+		.ReadScalar(pitchWheel, ASCPWheelBitCount)
+		.ReadScalar(yawWheel, ASCPWheelBitCount);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (roll > ASCPMaximumAngleValue || pitch > ASCPMaximumAngleValue || yaw > ASCPMaximumAngleValue ||
+		rollWheel > ASCPMaximumWheelValue || pitchWheel > ASCPMaximumWheelValue || yawWheel > ASCPMaximumWheelValue)
+		return ProviderResult::Rejected;
+
+	if (target) {
+		target->output = _V(roll / 10.0, pitch / 10.0, yaw / 10.0);
+		target->rolldisplay = rollWheel;
+		target->pitchdisplay = pitchWheel;
+		target->yawdisplay = yawWheel;
+	}
+	return ProviderResult::Success;
+}
+
+ProviderResult ASCP::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &) const
+{
+	if (strcmp(groupKey, ASCPControlGroupKey) != 0)
+		return ProviderResult::Unsupported;
+	return ReadReplication(reader, NULL);
+}
+
+void ASCP::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
+{
+	if (strcmp(groupKey, ASCPControlGroupKey) != 0)
+		return;
+	if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !replicatedPresentationActive)
+		return;
+	ReadReplication(reader, this);
+}
+
+void ASCP::OnRoleChanged(ReplicationRole role)
+{
+	replicatedPresentationActive = role == ReplicationRole::Replica;
 }
 
 void ASCP::TimeStep(double simdt)
