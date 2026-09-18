@@ -2075,15 +2075,6 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 		std::vector<DWORD> DSKY_LEB_Lights;
 		std::vector<DWORD> CW_Lights;
 
-		bool LightStates[CWS_LIGHTS_PER_PANEL * 2];
-
-		// Clear Lightstate list...
-		for (int i = 0; i < CWS_LIGHTS_PER_PANEL * 2; i++) {
-			LightStates[i] = false;
-		}
-		// ... and Read them
-		cws.GetCWLightStates(LightStates);
-
 		if (dsky.GetStatusLtPower()) {
 			if (dsky.UplinkLit())		{ DSKY_Lights.push_back(VC_MAT_DSKY_Lights_UPLINK_ACTY); }
 			if (dsky.NoAttLit())		{ DSKY_Lights.push_back(VC_MAT_DSKY_Lights_NO_ATT); }
@@ -2110,15 +2101,20 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 			if (dsky2.TrackerLit())		{ DSKY_LEB_Lights.push_back(VC_MAT_DSKY_LIGHT_LEB_TRACKER); }
 		}
 
-		const bool replicatedCautionWarning = IsMultiplayerReplica();
-		const std::uint64_t replicatedLightBits = cws.GetDisplayedLightBits();
-		if (replicatedCautionWarning) SetVCLighting(vcidx, IntegralLights_CW_Lights, MAT_LIGHT, 0, NUM_ELEMENTS(IntegralLights_CW_Lights));
+		const std::uint64_t displayedLightBits = cws.GetDisplayedLightBits();
+		SetVCLighting(vcidx, IntegralLights_CW_Lights, MAT_LIGHT, 0, NUM_ELEMENTS(IntegralLights_CW_Lights));
+		SetVCLighting(vcidx, IntegralLights_CW_Lights_CM, MAT_LIGHT, 0, NUM_ELEMENTS(IntegralLights_CW_Lights_CM));
+
+		// Raw light, ACK and light-test evaluation is disabled here temporarily, impact is not yet clear and for now the lighting path is streamlined
+		// and just uses the C&W internal calculation
+		// ((LightStates[i] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT)
+		// ((LightStates[i + 30] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT)
 
 		for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++)
 		{
-			if ((replicatedCautionWarning && (replicatedLightBits & (UINT64_C(1) << i))) || (!replicatedCautionWarning && ((LightStates[i] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT)))
+			if (displayedLightBits & (UINT64_C(1) << i))
 			{
-				if (replicatedCautionWarning || cws.GetSource() != CWS_SOURCE_CM) {
+				if (cws.GetSource() != CWS_SOURCE_CM) {
 					CW_Lights.push_back(IntegralLights_CW_Lights[i]);
 				}
 				else
@@ -2130,9 +2126,9 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 
 		for (int i = 0; i < CWS_LIGHTS_PER_PANEL; i++)
 		{
-			if ((replicatedCautionWarning && (replicatedLightBits & (UINT64_C(1) << (i + 30)))) || (!replicatedCautionWarning && ((LightStates[i+30] && cws.GetMode() != CWS_MODE_ACK) || cws.GetCWLightTest() == CWS_TEST_LIGHTS_RIGHT)))
+			if (displayedLightBits & (UINT64_C(1) << (i + 30)))
 			{
-				if (replicatedCautionWarning || cws.GetSource() != CWS_SOURCE_CM) {
+				if (cws.GetSource() != CWS_SOURCE_CM) {
 					CW_Lights.push_back(IntegralLights_CW_Lights[i + 30]);
 				}
 				else
@@ -2165,10 +2161,9 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 		}
 */
 		// LEB Conditional Lamps
-		const std::uint64_t lightBits = cws.GetDisplayedLightBits();
-		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, (lightBits & (UINT64_C(1) << 60)) ? 1.0 : 0.0, 1);
-		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, (lightBits & (UINT64_C(1) << 61)) ? 1.0 : 0.0, 1);
-		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, (lightBits & (UINT64_C(1) << 62)) ? 1.0 : 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, (displayedLightBits & (UINT64_C(1) << 60)) ? 1.0 : 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, (displayedLightBits & (UINT64_C(1) << 61)) ? 1.0 : 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, (displayedLightBits & (UINT64_C(1) << 62)) ? 1.0 : 0.0, 1);
 
 		/////////////////////
 		// Full Lit Lights //
@@ -2184,16 +2179,16 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 			}
 		}
 
-		if (IsMultiplayerReplica()) {
-			SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 0.0, 1);
-			SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 0.0, 1);
-			SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 0.0, 1);
-			const int masterAlarmBits = cws.GetDisplayedMasterAlarmBits();
-			if (masterAlarmBits & 1) SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
-			if (masterAlarmBits & 2) SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
-			if (masterAlarmBits & 4) SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 1.0, 1);
-		}
-		else if (cws.IsPowered()) {
+		SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 0.0, 1);
+		SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 0.0, 1);
+		const int masterAlarmBits = cws.GetDisplayedMasterAlarmBits();
+		if (masterAlarmBits & 1) SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
+		if (masterAlarmBits & 2) SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL2, MAT_LIGHT, 1.0, 1);
+		if (masterAlarmBits & 4) SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 1.0, 1);
+
+		/* VC-only master alarm evaluation is disabled because it duplicates the C&W display rules.
+		if (cws.IsPowered()) {
 			if ((cws.GetMasterAlarm() || cws.GetCWLightTest() == CWS_TEST_LIGHTS_LEFT) && cws.GetMode() != CWS_MODE_BOOST) {
 				SetVCLighting(vcidx, VC_MAT_MASTERALARM_PANEL1, MAT_LIGHT, 1.0, 1);
 			}
@@ -2206,6 +2201,7 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 				SetVCLighting(vcidx, VC_MAT_MasterAlarm_LEB, MAT_LIGHT, 1.0, 1);
 			}
 		}
+		*/
 
 		if (SI_EngineNum > 5){
 			if (ENGIND[0]) SetVCLighting(vcidx, LVEngine_8_1, MAT_LIGHT, 1.0, NUM_ELEMENTS(LVEngine_8_1));
@@ -5199,7 +5195,7 @@ void Saturn::DefineVCAnimations()
 	MainPanelVC.AddSwitch(&ORDEALAltSetRotary, AID_VC_ORDEAL_ROT);
 	ORDEALAltSetRotary.SetReference(ORDEAL_RotLocation, P13_ROT_AXIS);
 	ORDEALAltSetRotary.DefineMeshGroup(VC_GRP_ORDEAL_Rot);
-	ORDEALAltSetRotary.SetInitialAnimState(133.0 / 285.0); //133° from 10 NM to 150 NM, 285° total range
+	ORDEALAltSetRotary.SetInitialAnimState(133.0 / 285.0); //133ï¿½ from 10 NM to 150 NM, 285ï¿½ total range
 
 	// Panel 15
 

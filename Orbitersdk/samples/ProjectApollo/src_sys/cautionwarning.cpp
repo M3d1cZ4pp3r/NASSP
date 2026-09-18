@@ -56,7 +56,6 @@ CautionWarningSystem::CautionWarningSystem(Sound &mastersound, Sound &buttonsoun
 	MasterAlarm = false;
 	MasterAlarmLit = false;
 	MasterAlarmPressed = false;
-	ReplicatedMasterAlarmBits = 0;
 	InhibitNextMasterAlarm = false;
 	PlaySounds = true;
 
@@ -158,13 +157,19 @@ void CautionWarningSystem::TimeStep(double simt)
 	// Play sound if appropriate.
 	//
 
-	if (MasterAlarm && IsPowered() && PlaySounds) {
+	const bool playMasterAlarm = IsMasterAlarmSoundActive();
+	if (playMasterAlarm) {
 		if (!MasterAlarmSound.isPlaying()) {
 			MasterAlarmSound.play(LOOP);
 		}
 	} else {
 		MasterAlarmSound.stop();
 	}
+}
+
+bool CautionWarningSystem::IsMasterAlarmSoundActive()
+{
+	return MasterAlarm && IsPowered() && PlaySounds;
 }
 
 void CautionWarningSystem::SystemTimestep(double simdt) 
@@ -197,38 +202,31 @@ void CautionWarningSystem::SetMasterAlarm(bool alarm)
 void CautionWarningSystem::RenderMasterAlarm(SURFHANDLE surf, SURFHANDLE alarmLit, SURFHANDLE border, CWSMasterAlarmPosition position, int TexMul)
 
 {
-	// In Boost-Mode only the left master alarm button is not illuminated (Apollo Operations Handbook 2.10.3)
-	// The left/right lamp test illuminates the left/right master alarm button on the main panel (Apollo Operations Handbook 2.10.3)
-
-	if (UsesReplicatedMasterAlarmState()) {
-		const int positionBit = position == CWS_MASTERALARMPOSITION_LEFT ? 1 : 2;
-		if (ReplicatedMasterAlarmBits & positionBit)
-			oapiBlt(surf, alarmLit, 0, 0, 0, 0, 45*TexMul, 36*TexMul);
-	}
-	else if (LightsPowered() && (
-		(MasterAlarmLit && (MasterAlarmLightEnabled || position != CWS_MASTERALARMPOSITION_LEFT)) ||
-		(TestState == CWS_TEST_LIGHTS_LEFT && position == CWS_MASTERALARMPOSITION_LEFT && MasterAlarmLightEnabled) ||
-		(TestState == CWS_TEST_LIGHTS_RIGHT && position == CWS_MASTERALARMPOSITION_RIGHT))) {
+	if (IsMasterAlarmDisplayed(position)) {
 		oapiBlt(surf, alarmLit, 0, 0, 0, 0, 45*TexMul, 36*TexMul);
 	}
 	if (border)
 		oapiBlt(surf, border, 0, 0, 0, 0, 45*TexMul, 36*TexMul, SURF_PREDEF_CK);
 }
 
+bool CautionWarningSystem::IsMasterAlarmDisplayed(CWSMasterAlarmPosition position)
+{
+	// In Boost-Mode only the left master alarm button is not illuminated (Apollo Operations Handbook 2.10.3)
+	// The left/right lamp test illuminates the left/right master alarm button on the main panel (Apollo Operations Handbook 2.10.3)
+	return LightsPowered() && (
+		(MasterAlarmLit && (MasterAlarmLightEnabled || position != CWS_MASTERALARMPOSITION_LEFT)) ||
+		(TestState == CWS_TEST_LIGHTS_LEFT && position == CWS_MASTERALARMPOSITION_LEFT && MasterAlarmLightEnabled) ||
+		(TestState == CWS_TEST_LIGHTS_RIGHT && position == CWS_MASTERALARMPOSITION_RIGHT));
+}
+
 int CautionWarningSystem::GetDisplayedMasterAlarmBits()
 {
-	if (UsesReplicatedMasterAlarmState())
-		return ReplicatedMasterAlarmBits;
-
-	if (!LightsPowered())
-		return 0;
 	int bits = 0;
-	if ((MasterAlarmLit && MasterAlarmLightEnabled) ||
-		(TestState == CWS_TEST_LIGHTS_LEFT && MasterAlarmLightEnabled))
+	if (IsMasterAlarmDisplayed(CWS_MASTERALARMPOSITION_LEFT))
 		bits |= 1;
-	if (MasterAlarmLit || TestState == CWS_TEST_LIGHTS_RIGHT)
+	if (IsMasterAlarmDisplayed(CWS_MASTERALARMPOSITION_RIGHT))
 		bits |= 2;
-	if (MasterAlarm)
+	if (IsMasterAlarmDisplayed(CWS_MASTERALARMPOSITION_NONE))
 		bits |= 4;
 	return bits;
 }

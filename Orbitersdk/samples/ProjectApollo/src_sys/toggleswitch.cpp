@@ -5648,6 +5648,19 @@ bool CWSSourceSwitch::SwitchTo(int newState, bool dontspring)
 	return false;
 }
 
+void CWSSourceSwitch::ApplyReplicatedState(int value)
+{
+	ToggleSwitch::ApplyReplicatedState(value);
+	if (cws) {
+		if (IsUp()) {
+			cws->SetSource(CWS_SOURCE_CSM);
+		}
+		else if (IsDown()) {
+			cws->SetSource(CWS_SOURCE_CM);
+		}
+	}
+}
+
 //
 // Switch that controls AGC input channels.
 //

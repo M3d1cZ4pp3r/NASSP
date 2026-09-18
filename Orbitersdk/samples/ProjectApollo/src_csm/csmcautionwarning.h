@@ -29,6 +29,7 @@
 #include <cstdint>
 
 #include "replication/IReplicationProvider.h"
+#include "replication/ReplicaOverrideData.h"
 
 // moved from Saturn.h as "foreward reference" because of FuelCellBad
 
@@ -164,19 +165,16 @@ public:
 	///
 	std::uint64_t GetDisplayedLightBits();
 
-	///
-	/// \brief Set the C&W lamps shown by a replica.
-	/// \param bits Bits representing all C&W lamps to show.
-	///
-	void SetReplicatedLightBits(std::uint64_t bits) { ReplicatedLightBits = bits; }
-
-	///
-	/// \brief Clear the C&W lamps received from the authority.
-	///
-	void ClearReplicatedLightBits() { ReplicatedLightBits = 0; }
-
 protected:
-	bool UsesReplicatedMasterAlarmState() const override { return replicatedPresentationActive; }
+	bool IsMasterAlarmDisplayed(CWSMasterAlarmPosition position) override;
+	bool IsMasterAlarmSoundActive() override;
+
+	struct ReplicatedPresentation
+	{
+		std::uint64_t lightBits = 0;
+		std::uint8_t masterAlarmBits = 0;
+		bool masterAlarmSound = false;
+	};
 
 	//
 	// Don't need to be saved.
@@ -217,10 +215,7 @@ protected:
 	int GNLampState;
 	bool GNPGNSAlarm;
 
-	/// True while replicated C&W values are shown instead of locally calculated values.
-	bool replicatedPresentationActive;
-	/// C&W lamps received from the authority for display on this replica.
-	std::uint64_t ReplicatedLightBits;
+	ReplicaOverrideData<ReplicatedPresentation> replicatedData;
 
 	//
 	// Helper functions.

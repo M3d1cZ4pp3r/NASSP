@@ -1000,6 +1000,7 @@ public:
 	CWSSourceSwitch() { cws = 0; };
 	void Init(int xp, int yp, int w, int h, SURFHANDLE surf, SURFHANDLE bsurf, SwitchRow &row, CautionWarningSystem *c);
 	virtual bool SwitchTo(int newState, bool dontspring = false);
+	void ApplyReplicatedState(int value) override;
 
 protected:
 	///

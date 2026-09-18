@@ -50,13 +50,15 @@ namespace
 // The visible C/W state contains 60 panel lights followed by three LEB condition lights.
 const unsigned int CautionWarningLightBitCount = CWS_LIGHTS_PER_PANEL * 2 + 3;
 const unsigned int MasterAlarmBitCount = 3;
+const unsigned int MasterAlarmSoundBitCount = 1;
 const unsigned int CautionWarningPresentationBytes =
-	(CautionWarningLightBitCount + MasterAlarmBitCount + 7) / 8;
+	(CautionWarningLightBitCount + MasterAlarmBitCount + MasterAlarmSoundBitCount + 7) / 8;
 
 struct CautionWarningPresentation
 {
 	std::uint64_t lights = 0;
 	std::uint8_t masterAlarm = 0;
+	bool masterAlarmSound = false;
 };
 
 ProviderResult ReadMasterAlarmInput(const ReplicationReader &reader, bool &pressed)
@@ -69,7 +71,8 @@ ProviderResult ReadMasterAlarmInput(const ReplicationReader &reader, bool &press
 ProviderResult ReadCautionWarningPresentation(const ReplicationReader &reader, CautionWarningPresentation &presentation)
 {
 	reader.ReadScalar(presentation.lights, CautionWarningLightBitCount)
-		.ReadScalar(presentation.masterAlarm, MasterAlarmBitCount);
+		.ReadScalar(presentation.masterAlarm, MasterAlarmBitCount)
+		.ReadScalar(presentation.masterAlarmSound);
 	const bool payloadComplete = reader.Finish();
 	return payloadComplete ? ProviderResult::Success : ProviderResult::Malformed;
 }
@@ -80,8 +83,6 @@ CSMCautionWarningSystem::CSMCautionWarningSystem(Sound &mastersound, Sound &butt
 
 {
 	NextUpdateTime = MINUS_INFINITY;
-	ReplicatedLightBits = 0;
-	replicatedPresentationActive = false;
 
 	NextO2FlowCheckTime = MINUS_INFINITY;
 	LastO2FlowCheckHigh = false;
@@ -813,6 +814,8 @@ ProviderResult CSMCautionWarningSystem::Describe(ReplicationCatalogBuilder &cata
 	presentationSchema.AddUint32(CautionWarningLightBitCount);
 	presentationSchema.AddString("master_alarm");
 	presentationSchema.AddUint32(MasterAlarmBitCount);
+	presentationSchema.AddString("master_alarm_sound");
+	presentationSchema.AddUint32(MasterAlarmSoundBitCount);
 	presentation.schemaId = presentationSchema.SchemaId();
 	presentation.delivery = ReplicationDelivery::Unreliable;
 	presentation.periodicIntervalMs = 33;
@@ -834,8 +837,10 @@ ProviderResult CSMCautionWarningSystem::Capture(const char *groupKey, Replicatio
 	if (std::strcmp(groupKey, "visible_lights") == 0) {
 		const std::uint64_t lights = GetDisplayedLightBits();
 		const std::uint8_t masterAlarm = static_cast<std::uint8_t>(GetDisplayedMasterAlarmBits());
+		const bool masterAlarmSound = IsMasterAlarmSoundActive();
 		writer.WriteScalar(lights, CautionWarningLightBitCount)
-			.WriteScalar(masterAlarm, MasterAlarmBitCount);
+			.WriteScalar(masterAlarm, MasterAlarmBitCount)
+			.WriteScalar(masterAlarmSound);
 		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 	}
 
@@ -872,24 +877,20 @@ void CSMCautionWarningSystem::Apply(const char *groupKey, const ReplicationReade
 
 	CautionWarningPresentation presentation;
 	ReadCautionWarningPresentation(reader, presentation);
-	SetReplicatedLightBits(presentation.lights);
-	SetReplicatedMasterAlarmBits(presentation.masterAlarm);
+	replicatedData->lightBits = presentation.lights;
+	replicatedData->masterAlarmBits = presentation.masterAlarm;
+	replicatedData->masterAlarmSound = presentation.masterAlarmSound;
 }
 
 void CSMCautionWarningSystem::OnRoleChanged(ReplicationRole role)
 {
-	replicatedPresentationActive = role == ReplicationRole::Replica;
-	if (!replicatedPresentationActive) {
-		ClearReplicatedLightBits();
-		ClearReplicatedMasterAlarmBits();
-	}
+	replicatedData.SetActive(role == ReplicationRole::Replica);
+	if (!replicatedData.IsActive())
+		*replicatedData = ReplicatedPresentation{};
 }
 
 std::uint64_t CSMCautionWarningSystem::GetDisplayedLightBits()
 {
-	if (replicatedPresentationActive)
-		return ReplicatedLightBits;
-
 	std::uint64_t bits = 0;
 	if (LightsPowered()) {
 		for (int light = 0; light < CWS_LIGHTS_PER_PANEL * 2; ++light) {
@@ -911,7 +912,21 @@ std::uint64_t CSMCautionWarningSystem::GetDisplayedLightBits()
 		if (GNLampState == 2 || RightLights[CSM_CWS_ISS_LIGHT - CWS_LIGHTS_PER_PANEL])
 			bits |= UINT64_C(1) << 62;
 	}
-	return bits;
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::lightBits, bits);
+}
+
+bool CSMCautionWarningSystem::IsMasterAlarmDisplayed(CWSMasterAlarmPosition position)
+{
+	if (!replicatedData.IsActive())
+		return CautionWarningSystem::IsMasterAlarmDisplayed(position);
+
+	const std::uint8_t positionBit = position == CWS_MASTERALARMPOSITION_LEFT ? 1 : position == CWS_MASTERALARMPOSITION_RIGHT ? 2 : 4;
+	return (replicatedData->masterAlarmBits & positionBit) != 0;
+}
+
+bool CSMCautionWarningSystem::IsMasterAlarmSoundActive()
+{
+	return replicatedData.OverrideIfReplica(&ReplicatedPresentation::masterAlarmSound, CautionWarningSystem::IsMasterAlarmSoundActive()) && !MasterAlarmPressed;
 }
 
 void CSMCautionWarningSystem::SaveState(FILEHANDLE scn)

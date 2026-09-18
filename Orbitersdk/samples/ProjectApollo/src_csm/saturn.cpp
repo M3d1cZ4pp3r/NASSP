@@ -1923,8 +1923,8 @@ void Saturn::clbkPostStep(double simt, double simdt, double mjd)
 	if (!IsMultiplayerReplica()) {
 		// Order is important, otherwise delayed springloaded switches are reset immediately
 		MainPanel.timestep(MissionTime);
-		checkControl.timestep(MissionTime, eventControl);
 	}
+	checkControl.timestep(MissionTime, eventControl);
 
 	// Update VC animations
 	if (oapiCameraInternal() && oapiCockpitMode() == COCKPIT_VIRTUAL)
@@ -3719,6 +3719,8 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 	else {
 		// Keep ASCP mouse hold handling active for replicas.
 		ascp.TimeStep(simdt);
+		// Present the replicated Master Alarm sound without running local C&W calculations.
+		cws.TimeStep(SimulatedTime);
 		// Needed to copy replicated EDA values to display on FDAI
 		FDAITimestep(simt, simdt);
 		ems.ReplicaTimestep(simdt);
