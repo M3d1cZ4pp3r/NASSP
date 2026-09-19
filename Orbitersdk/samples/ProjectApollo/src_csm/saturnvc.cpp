@@ -2150,20 +2150,23 @@ bool Saturn::clbkVCRedrawEvent (int id, int event, SURFHANDLE surf)
 					SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, Panel100NumericRotarySwitch.GetOutput() + floodRotaryValue, 1);
 				}
 
-				if (cws.GetGNLampState() == 2 || LightStates[CSM_CWS_CMC_LIGHT + 30 - CWS_LIGHTS_PER_PANEL]) {
+			if (cws.GetGNLampState() == 2 || LightStates[CSM_CWS_CMC_LIGHT + 30 - CWS_LIGHTS_PER_PANEL]) {
 					SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, Panel100NumericRotarySwitch.GetOutput() + floodRotaryValue, 1);
-				}
+			}
 
-				if (cws.GetGNLampState() == 2 || LightStates[CSM_CWS_ISS_LIGHT + 30 - CWS_LIGHTS_PER_PANEL]) {
+			if (cws.GetGNLampState() == 2 || LightStates[CSM_CWS_ISS_LIGHT + 30 - CWS_LIGHTS_PER_PANEL]) {
 					SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, Panel100NumericRotarySwitch.GetOutput() + floodRotaryValue, 1);
 				}
 			}
 		}
 */
 		// LEB Conditional Lamps
-		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, (displayedLightBits & (UINT64_C(1) << 60)) ? 1.0 : 0.0, 1);
-		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, (displayedLightBits & (UINT64_C(1) << 61)) ? 1.0 : 0.0, 1);
-		SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, (displayedLightBits & (UINT64_C(1) << 62)) ? 1.0 : 0.0, 1);
+		if (displayedLightBits & (UINT64_C(1) << 60))
+			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_PGNS, MAT_LIGHT, 1.0, 1);
+		if (displayedLightBits & (UINT64_C(1) << 61))
+			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_CMC, MAT_LIGHT, 1.0, 1);
+		if (displayedLightBits & (UINT64_C(1) << 62))
+			SetVCLighting(vcidx, VC_MAT_LEB_ConditionLamp_ISS, MAT_LIGHT, 1.0, 1);
 
 		/////////////////////
 		// Full Lit Lights //

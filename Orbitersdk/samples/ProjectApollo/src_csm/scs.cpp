@@ -1158,7 +1158,7 @@ ProviderResult ASCP::Describe(ReplicationCatalogBuilder &catalog) const
 	controls.clientReplicates = true;
 	controls.replicateChanges = true;
 	controls.maximumPayloadBytes = ASCPPayloadBytes;
-	controls.inputAuthorityHoldMs = 150;
+	controls.inputAuthorityHoldMs = InputAuthorityHoldMilliseconds;
 	catalog.AddGroup(controls);
 	return ProviderResult::Success;
 }
@@ -5114,7 +5114,7 @@ ProviderResult EMS::Describe(ReplicationCatalogBuilder &catalog) const
 	input.clientReplicates = true;
 	input.replicateChanges = true;
 	input.maximumPayloadBytes = 1;
-	input.inputAuthorityHoldMs = 150;
+	input.inputAuthorityHoldMs = InputAuthorityHoldMilliseconds;
 	catalog.AddGroup(input);
 
 	ReplicationSchemaBuilder baselinePresentationSchema;

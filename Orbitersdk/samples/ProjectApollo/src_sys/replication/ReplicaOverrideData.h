@@ -1,5 +1,7 @@
 #pragma once
 
+#include <type_traits>
+
 template<class T>
 class ReplicaOverrideData
 {
@@ -9,8 +11,12 @@ public:
 	T *operator->() { return &value; }
 	const T *operator->() const { return &value; }
 
-	template<class Field>
-	Field OverrideIfReplica(Field T::*member, Field liveValue) const { return active ? value.*member : liveValue; }
+	template<class Object, class Field>
+	Field OverrideIfReplica(Field Object::*member, Field liveValue) const
+	{
+		static_assert(std::is_same<Object, T>::value, "Member must belong to the replicated value type");
+		return active ? value.*member : liveValue;
+	}
 
 	bool IsActive() const { return active; }
 	void SetActive(bool enabled) { active = enabled; }

@@ -804,6 +804,7 @@ ProviderResult CSMCautionWarningSystem::Describe(ReplicationCatalogBuilder &cata
 	input.delivery = ReplicationDelivery::Reliable;
 	input.clientReplicates = true;
 	input.replicateChanges = true;
+	input.inputAuthorityHoldMs = InputAuthorityHoldMilliseconds;
 	input.maximumPayloadBytes = sizeof(std::uint8_t);
 	catalog.AddGroup(input);
 

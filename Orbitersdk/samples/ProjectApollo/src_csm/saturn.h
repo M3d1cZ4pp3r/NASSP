@@ -4274,6 +4274,7 @@ protected:
 	void ProbeSound();
 	void CabinFanSound();
 	void StopCabinFanSound();
+	void SetSuitCompressorSound(bool compressor1On, bool compressor2On);
 	void CabinFansSystemTimestep();
 	void ButtonClick();
 	void GuardClick();
@@ -4596,11 +4597,16 @@ protected:
 	void CaptureExternalVisualPresentation(ExternalVisualPresentation &target);
 	ProviderResult ReadExternalVisualPresentation(const ReplicationReader &reader, ExternalVisualPresentation *target) const;
 	void ApplyExternalVisualPresentation(const ExternalVisualPresentation &presentation, ThrusterPresentationMode mode);
+	ProviderResult ReadAmbientSoundState(const ReplicationReader &reader, std::uint8_t *target) const;
+	void ApplyAmbientSoundState(std::uint8_t state);
+	ProviderResult ReadMissionTime(const ReplicationReader &reader, double *target) const;
+	ProviderResult ReadChecklistEvents(const ReplicationReader &reader, SaturnEvents *target) const;
 	void AssignReplicaThrusterResource();
 	void ClearReplicaThrusterLevels();
 	void PresentReplicaState();
 
 	ReplicaOverrideData<ExternalVisualPresentation> replicatedExternalVisuals;
+	ReplicaOverrideData<std::uint8_t> replicatedAmbientSounds;
 	PROPELLANT_HANDLE replicaThrusterResource = NULL;
 
 	PSTREAM_HANDLE dyemarker;

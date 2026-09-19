@@ -12,6 +12,8 @@ using ReplicationDelivery = nasspmp_api::replication::ReplicationDelivery;
 using ReplicationRole = nasspmp_api::replication::ReplicationRole;
 using ApplyPurpose = nasspmp_api::replication::ApplyPurpose;
 
+constexpr std::uint32_t InputAuthorityHoldMilliseconds = 150;
+
 enum class ProviderResult
 {
 	// The provider completed the requested operation.
@@ -42,7 +44,7 @@ struct ReplicationGroupDescriptor
 	std::uint32_t periodicIntervalMs = 0;
 	// Sends a sample whenever capture observes a changed payload.
 	bool replicateChanges = true;
-	// Prevents authority echo from fighting an in-progress local continuous input.
+	// Prevents authority echo from fighting an in-progress local input sequence.
 	std::uint32_t inputAuthorityHoldMs = 0;
 	// Bounds one capture payload before any ABI or network allocation.
 	std::uint32_t maximumPayloadBytes = 0;

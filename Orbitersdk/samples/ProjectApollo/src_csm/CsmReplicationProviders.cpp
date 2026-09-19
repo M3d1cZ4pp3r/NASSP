@@ -118,6 +118,7 @@ ProviderResult PanelControlProvider::Describe(ReplicationCatalogBuilder &catalog
 		controls.clientReplicates = true;
 		controls.replicateChanges = true;
 		controls.maximumPayloadBytes = MaximumPayloadBytes(discreteControls);
+		controls.inputAuthorityHoldMs = InputAuthorityHoldMilliseconds;
 		catalog.AddGroup(controls);
 	}
 
@@ -129,7 +130,7 @@ ProviderResult PanelControlProvider::Describe(ReplicationCatalogBuilder &catalog
 		controls.clientReplicates = true;
 		controls.replicateChanges = true;
 		controls.maximumPayloadBytes = MaximumPayloadBytes(continuousControls);
-		controls.inputAuthorityHoldMs = 150;
+		controls.inputAuthorityHoldMs = InputAuthorityHoldMilliseconds;
 		catalog.AddGroup(controls);
 	}
 

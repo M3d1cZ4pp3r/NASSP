@@ -80,6 +80,30 @@ using namespace nassp;
 namespace
 {
 const char *ExternalPropulsionGroupKey = "propulsion";
+const char *ApolloTimeGroupKey = "apollo_time";
+const char *ChecklistEventsGroupKey = "checklist_events";
+const char *AmbientSoundsGroupKey = "ambient_sounds";
+const unsigned int AmbientSoundBitCount = 3;
+const std::uint8_t CabinFansSoundBit = 1 << 0;
+const std::uint8_t SuitCompressor1SoundBit = 1 << 1;
+const std::uint8_t SuitCompressor2SoundBit = 1 << 2;
+double SaturnEvents::*const ChecklistEventFields[] = {
+	&SaturnEvents::BACKUP_CREW_PRELAUNCH,
+	&SaturnEvents::PRIME_CREW_PRELAUNCH,
+	&SaturnEvents::SECOND_STAGE_STAGING,
+	&SaturnEvents::TOWER_JETTISON,
+	&SaturnEvents::SIVB_STAGE_STAGING,
+	&SaturnEvents::EARTH_ORBIT_INSERTION,
+	&SaturnEvents::TLI,
+	&SaturnEvents::TLI_DONE,
+	&SaturnEvents::CSM_LV_SEPARATION,
+	&SaturnEvents::CSM_LV_SEPARATION_DONE,
+	&SaturnEvents::PAYLOAD_EXTRACTION,
+	&SaturnEvents::CM_SM_SEPARATION,
+	&SaturnEvents::CM_SM_SEPARATION_DONE,
+	&SaturnEvents::SPLASHDOWN
+};
+const unsigned int ChecklistEventCount = sizeof(ChecklistEventFields) / sizeof(ChecklistEventFields[0]);
 
 std::uint8_t EncodeThrusterLevel(Saturn &saturn, THRUSTER_HANDLE thruster)
 {
@@ -1286,6 +1310,46 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 	presentation.replicateChanges = false;
 	presentation.maximumPayloadBytes = ThrusterLevelCount + 2 * sizeof(float);
 	catalog.AddGroup(presentation);
+
+	ReplicationSchemaBuilder timeSchema;
+	timeSchema.AddString("saturn-apollo-time-v1");
+	timeSchema.AddString("mission_time_seconds:float64");
+
+	ReplicationGroupDescriptor time;
+	time.key = ApolloTimeGroupKey;
+	time.schemaId = timeSchema.SchemaId();
+	time.delivery = ReplicationDelivery::Unreliable;
+	time.periodicIntervalMs = 50;
+	time.replicateChanges = false;
+	time.maximumPayloadBytes = sizeof(double);
+	catalog.AddGroup(time);
+
+	ReplicationSchemaBuilder checklistEventSchema;
+	checklistEventSchema.AddString("saturn-checklist-events-v1");
+	checklistEventSchema.AddString("backup_crew_prelaunch:float64;prime_crew_prelaunch:float64;second_stage_staging:float64;tower_jettison:float64;sivb_stage_staging:float64;earth_orbit_insertion:float64;tli:float64;tli_done:float64;csm_lv_separation:float64;csm_lv_separation_done:float64;payload_extraction:float64;cm_sm_separation:float64;cm_sm_separation_done:float64;splashdown:float64");
+
+	ReplicationGroupDescriptor checklistEvents;
+	checklistEvents.key = ChecklistEventsGroupKey;
+	checklistEvents.schemaId = checklistEventSchema.SchemaId();
+	checklistEvents.delivery = ReplicationDelivery::Reliable;
+	checklistEvents.replicateChanges = true;
+	checklistEvents.maximumPayloadBytes = ChecklistEventCount * sizeof(double);
+	catalog.AddGroup(checklistEvents);
+
+	ReplicationSchemaBuilder soundSchema;
+	soundSchema.AddString("saturn-ambient-sounds-v2");
+	soundSchema.AddString("cabin_fans_active:bool");
+	soundSchema.AddString("suit_compressor_1_on:bool");
+	soundSchema.AddString("suit_compressor_2_on:bool");
+
+	ReplicationGroupDescriptor sounds;
+	sounds.key = AmbientSoundsGroupKey;
+	sounds.schemaId = soundSchema.SchemaId();
+	sounds.delivery = ReplicationDelivery::Unreliable;
+	sounds.periodicIntervalMs = 100;
+	sounds.replicateChanges = false;
+	sounds.maximumPayloadBytes = 1;
+	catalog.AddGroup(sounds);
 	return ProviderResult::Success;
 }
 
@@ -1314,6 +1378,26 @@ void Saturn::CaptureExternalVisualPresentation(ExternalVisualPresentation &targe
 
 ProviderResult Saturn::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context)
 {
+	if (std::strcmp(groupKey, ApolloTimeGroupKey) == 0) {
+		writer.WriteScalar(MissionTime);
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
+	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
+		for (unsigned int index = 0; index < ChecklistEventCount; index++)
+			writer.WriteScalar(eventControl.*ChecklistEventFields[index]);
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
+	if (std::strcmp(groupKey, AmbientSoundsGroupKey) == 0) {
+		std::uint8_t state = 0;
+		if (CabinFansActive())
+			state |= CabinFansSoundBit;
+		if (SuitCompressor1->IsOn())
+			state |= SuitCompressor1SoundBit;
+		if (SuitCompressor2->IsOn())
+			state |= SuitCompressor2SoundBit;
+		writer.WriteScalar(state, AmbientSoundBitCount);
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
 	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0)
 		return ProjectApolloConnectorVessel::Capture(groupKey, writer, context);
 
@@ -1336,6 +1420,49 @@ ProviderResult Saturn::Capture(const char *groupKey, ReplicationWriter &writer, 
 	WriteThrusterLevels(writer, presentation.les);
 	writer.WriteScalar(presentation.pitchControlMotor, 8);
 	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+}
+
+ProviderResult Saturn::ReadAmbientSoundState(const ReplicationReader &reader, std::uint8_t *target) const
+{
+	std::uint8_t decoded = 0;
+	reader.ReadScalar(decoded, AmbientSoundBitCount);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+
+	if (target)
+		*target = decoded;
+	return ProviderResult::Success;
+}
+
+ProviderResult Saturn::ReadMissionTime(const ReplicationReader &reader, double *target) const
+{
+	double decoded;
+	reader.ReadScalar(decoded);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (!std::isfinite(decoded))
+		return ProviderResult::Rejected;
+
+	if (target)
+		*target = decoded;
+	return ProviderResult::Success;
+}
+
+ProviderResult Saturn::ReadChecklistEvents(const ReplicationReader &reader, SaturnEvents *target) const
+{
+	SaturnEvents decoded;
+	for (unsigned int index = 0; index < ChecklistEventCount; index++)
+		reader.ReadScalar(decoded.*ChecklistEventFields[index]);
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	for (unsigned int index = 0; index < ChecklistEventCount; index++) {
+		if (!std::isfinite(decoded.*ChecklistEventFields[index]))
+			return ProviderResult::Rejected;
+	}
+
+	if (target)
+		*target = decoded;
+	return ProviderResult::Success;
 }
 
 ProviderResult Saturn::ReadExternalVisualPresentation(const ReplicationReader &reader, ExternalVisualPresentation *target) const
@@ -1370,6 +1497,21 @@ ProviderResult Saturn::ReadExternalVisualPresentation(const ReplicationReader &r
 
 ProviderResult Saturn::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
 {
+	if (std::strcmp(groupKey, ApolloTimeGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return ProviderResult::Unsupported;
+		return ReadMissionTime(reader, NULL);
+	}
+	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return ProviderResult::Unsupported;
+		return ReadChecklistEvents(reader, NULL);
+	}
+	if (std::strcmp(groupKey, AmbientSoundsGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return ProviderResult::Unsupported;
+		return ReadAmbientSoundState(reader, NULL);
+	}
 	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0)
 		return ProjectApolloConnectorVessel::Validate(groupKey, reader, context);
 	if (context.purpose == ApplyPurpose::RemoteInput)
@@ -1379,6 +1521,28 @@ ProviderResult Saturn::Validate(const char *groupKey, const ReplicationReader &r
 
 void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
 {
+	if (std::strcmp(groupKey, ApolloTimeGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return;
+		if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !IsMultiplayerReplica())
+			return;
+		ReadMissionTime(reader, &MissionTime);
+		return;
+	}
+	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return;
+		if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !IsMultiplayerReplica())
+			return;
+		ReadChecklistEvents(reader, &eventControl);
+		return;
+	}
+	if (std::strcmp(groupKey, AmbientSoundsGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return;
+		ReadAmbientSoundState(reader, &*replicatedAmbientSounds);
+		return;
+	}
 	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0) {
 		ProjectApolloConnectorVessel::Apply(groupKey, reader, context);
 		return;
@@ -1386,6 +1550,15 @@ void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const 
 	if (context.purpose == ApplyPurpose::RemoteInput)
 		return;
 	ReadExternalVisualPresentation(reader, &*replicatedExternalVisuals);
+}
+
+void Saturn::ApplyAmbientSoundState(std::uint8_t state)
+{
+	if (state & CabinFansSoundBit)
+		CabinFanSound();
+	else
+		StopCabinFanSound();
+	SetSuitCompressorSound((state & SuitCompressor1SoundBit) != 0, (state & SuitCompressor2SoundBit) != 0);
 }
 
 void Saturn::ApplyExternalVisualPresentation(const ExternalVisualPresentation &presentation, ThrusterPresentationMode mode)
@@ -1450,6 +1623,8 @@ void Saturn::PresentReplicaState()
 {
 	if (replicatedExternalVisuals.IsActive())
 		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::Render);
+	if (replicatedAmbientSounds.IsActive())
+		ApplyAmbientSoundState(*replicatedAmbientSounds);
 }
 
 void Saturn::OnRoleChanged(ReplicationRole role)
@@ -1460,6 +1635,7 @@ void Saturn::OnRoleChanged(ReplicationRole role)
 	if (role == ReplicationRole::Replica)
 		AssignReplicaThrusterResource();
 	replicatedExternalVisuals.SetActive(role == ReplicationRole::Replica);
+	replicatedAmbientSounds.SetActive(role == ReplicationRole::Replica);
 }
 
 void Saturn::RegisterReplicationProviders()
@@ -3517,7 +3693,8 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 	//
 
 	SimulatedTime += simdt;
-	MissionTime += simdt;
+	if (!IsMultiplayerReplica())
+		MissionTime += simdt;
 
 	//
 	// Panel flash counter.

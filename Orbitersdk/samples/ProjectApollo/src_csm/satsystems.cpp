@@ -2810,9 +2810,14 @@ void Saturn::CabinFansSystemTimestep()
 	// Suit Compressor sound
 	//
 
+	SetSuitCompressorSound(SuitCompressor1->IsOn(), SuitCompressor2->IsOn());
+}
+
+void Saturn::SetSuitCompressorSound(bool compressor1On, bool compressor2On)
+{
 	double vol = 0;
-	if (SuitCompressor1->IsOn()) vol += (32.0 / 255.0);
-	if (SuitCompressor2->IsOn()) vol += (32.0 / 255.0);
+	if (compressor1On) vol += (32.0 / 255.0);
+	if (compressor2On) vol += (32.0 / 255.0);
 
 	if (vol > 0)
 		SuitCompressorSound.play(vol + (191.0 / 255.0));
