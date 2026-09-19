@@ -27,6 +27,7 @@
 
 #include "DelayTimer.h"
 #include "smjc.h"
+#include "replication/ReplicaOverrideData.h"
 
 class Saturn;
 class FloatBag;
@@ -373,6 +374,9 @@ public:
 	bool LiftoffLightPower();
 	bool NoAutoAbortLightPower();
 
+	void SetReplicatedLightPresentation(bool liftoffLightPower, bool noAutoAbortLightPower);
+	void SetReplicationPresentationActive(bool active);
+
 	bool GetDockingProbeRetractPrim1() { return LDECA.GetDockingProbeRetract1(); }
 	bool GetDockingProbeRetractPrim2() { return LDECA.GetDockingProbeRetract2(); }
 	bool GetDockingProbeRetractSec1() { return LDECB.GetDockingProbeRetract1(); }
@@ -402,12 +406,19 @@ public:
 	SMJC* SMJCB;
 
 protected:
+	struct ReplicatedLightPresentation
+	{
+		bool liftoffLightPower = false;
+		bool noAutoAbortLightPower = false;
+	};
+
 	bool IsLogicPoweredAndArmedA();
 	bool IsLogicPoweredAndArmedB();
 	
 	int State;
 
 	Saturn *Sat;
+	ReplicaOverrideData<ReplicatedLightPresentation> replicatedLightPresentation;
 };
 
 class BaroSwitch

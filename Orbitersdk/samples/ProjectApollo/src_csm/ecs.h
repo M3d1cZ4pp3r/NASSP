@@ -242,6 +242,8 @@ public:
 
 	void Init(Saturn *s, RotationalSwitch *gbs, RotationalSwitch *ahs, RotationalSwitch *ahso, RotationalSwitch *vvr);
 	void Toggle(bool enforce = false);
+	// Apply the authority-owned hatch target, optionally using the normal transition animation.
+	void SetReplicatedOpen(bool isOpen, bool animate);
 	void Timestep(double simdt);
 	bool IsOpen() { return open; };
 	RotationalSwitch *GetVentValveRotary() { return ventValveRotary; };

@@ -922,6 +922,30 @@ void SaturnSideHatch::Toggle(bool enforce) {
 	}
 }
 
+void SaturnSideHatch::SetReplicatedOpen(bool isOpen, bool animate)
+{
+	if (open == isOpen)
+		return;
+
+	open = isOpen;
+	toggle = 2;
+	saturn->SetSideHatchMesh();
+
+	if (!animate) {
+		sidehatch_state.SetState(open ? 1.0 : 0.0, 0.0);
+		saturn->SetAnimation(anim_SideHatchVC, sidehatch_state.State());
+		return;
+	}
+
+	if (open) {
+		sidehatch_state.Open();
+		OpenSound.play();
+	} else {
+		sidehatch_state.Close();
+		CloseSound.play();
+	}
+}
+
 void SaturnSideHatch::Timestep(double simdt) {
 
 	if (toggle > 0) {
@@ -968,7 +992,8 @@ void SaturnSideHatch::Timestep(double simdt) {
 }
 
 void SaturnSideHatch::SwitchToggled(PanelSwitchItem *s) {
-	Toggle();
+	if (!saturn->IsMultiplayerReplica())
+		Toggle();
 }
 
 void SaturnSideHatch::LoadState(char *line) {

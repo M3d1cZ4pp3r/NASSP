@@ -4328,7 +4328,8 @@ void Saturn::RenderS1bEngineLight(bool EngineOn, SURFHANDLE dest, SURFHANDLE src
 
 bool Saturn::AbortLightLogic()
 {
-	return ((secs.AbortLightPowerA() && udl.GetAbortLightA()) || ((secs.AbortLightPowerB() && udl.GetAbortLightB())) || (iuCommandConnector.GetAbortLight()));
+	const bool lightOn = ((secs.AbortLightPowerA() && udl.GetAbortLightA()) || ((secs.AbortLightPowerB() && udl.GetAbortLightB())) || (iuCommandConnector.GetAbortLight()));
+	return replicatedPresentation.OverrideIfReplica(&ReplicatedPresentation::abortLight, lightOn);
 }
 
 bool Saturn::clbkPanelRedrawEvent(int id, int event, SURFHANDLE surf)

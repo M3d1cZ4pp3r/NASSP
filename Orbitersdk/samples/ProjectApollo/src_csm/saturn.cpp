@@ -79,10 +79,8 @@ using namespace nassp;
 
 namespace
 {
-const char *ExternalPropulsionGroupKey = "propulsion";
-const char *ApolloTimeGroupKey = "apollo_time";
+const char *PresentationGroupKey = "presentation";
 const char *ChecklistEventsGroupKey = "checklist_events";
-const char *AmbientSoundsGroupKey = "ambient_sounds";
 const unsigned int AmbientSoundBitCount = 3;
 const std::uint8_t CabinFansSoundBit = 1 << 0;
 const std::uint8_t SuitCompressor1SoundBit = 1 << 1;
@@ -1286,7 +1284,7 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 		return baseResult;
 
 	ReplicationSchemaBuilder schema;
-	schema.AddString("saturn-external-propulsion-v1");
+	schema.AddString("saturn-presentation-v1");
 	schema.AddString("sm_rcs:uint8x16");
 	schema.AddString("cm_rcs:uint8x12");
 	schema.AddString("sps:uint8");
@@ -1301,28 +1299,18 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 	schema.AddString("separation:uint8x16");
 	schema.AddString("les:uint8x4");
 	schema.AddString("pitch_control_motor:uint8");
+	schema.AddString("mission_time_seconds:float64");
+	schema.AddString("cabin_fans_active:bool;suit_compressor_1_on:bool;suit_compressor_2_on:bool");
+	schema.AddString("abort_light:bool;liftoff_light_power:bool;no_auto_abort_light_power:bool;side_hatch_open:bool");
 
 	ReplicationGroupDescriptor presentation;
-	presentation.key = ExternalPropulsionGroupKey;
+	presentation.key = PresentationGroupKey;
 	presentation.schemaId = schema.SchemaId();
 	presentation.delivery = ReplicationDelivery::Unreliable;
 	presentation.periodicIntervalMs = 50;
 	presentation.replicateChanges = false;
-	presentation.maximumPayloadBytes = ThrusterLevelCount + 2 * sizeof(float);
+	presentation.maximumPayloadBytes = ThrusterLevelCount + 2 * sizeof(float) + sizeof(double) + 1;
 	catalog.AddGroup(presentation);
-
-	ReplicationSchemaBuilder timeSchema;
-	timeSchema.AddString("saturn-apollo-time-v1");
-	timeSchema.AddString("mission_time_seconds:float64");
-
-	ReplicationGroupDescriptor time;
-	time.key = ApolloTimeGroupKey;
-	time.schemaId = timeSchema.SchemaId();
-	time.delivery = ReplicationDelivery::Unreliable;
-	time.periodicIntervalMs = 50;
-	time.replicateChanges = false;
-	time.maximumPayloadBytes = sizeof(double);
-	catalog.AddGroup(time);
 
 	ReplicationSchemaBuilder checklistEventSchema;
 	checklistEventSchema.AddString("saturn-checklist-events-v1");
@@ -1336,116 +1324,80 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 	checklistEvents.maximumPayloadBytes = ChecklistEventCount * sizeof(double);
 	catalog.AddGroup(checklistEvents);
 
-	ReplicationSchemaBuilder soundSchema;
-	soundSchema.AddString("saturn-ambient-sounds-v2");
-	soundSchema.AddString("cabin_fans_active:bool");
-	soundSchema.AddString("suit_compressor_1_on:bool");
-	soundSchema.AddString("suit_compressor_2_on:bool");
-
-	ReplicationGroupDescriptor sounds;
-	sounds.key = AmbientSoundsGroupKey;
-	sounds.schemaId = soundSchema.SchemaId();
-	sounds.delivery = ReplicationDelivery::Unreliable;
-	sounds.periodicIntervalMs = 100;
-	sounds.replicateChanges = false;
-	sounds.maximumPayloadBytes = 1;
-	catalog.AddGroup(sounds);
 	return ProviderResult::Success;
 }
 
-void Saturn::CaptureExternalVisualPresentation(ExternalVisualPresentation &target)
+void Saturn::CapturePresentation(PresentationPayload &target)
 {
-	CaptureThrusterLevels(*this, th_rcs_a + 1, target.smRcs, 4);
-	CaptureThrusterLevels(*this, th_rcs_b + 1, target.smRcs + 4, 4);
-	CaptureThrusterLevels(*this, th_rcs_c + 1, target.smRcs + 8, 4);
-	CaptureThrusterLevels(*this, th_rcs_d + 1, target.smRcs + 12, 4);
-	CaptureThrusterLevels(*this, th_att_cm, target.cmRcs, CmRcsThrusterCount);
-	target.sps = EncodeThrusterLevel(*this, th_sps[0]);
-	target.spsPitch = static_cast<float>(GetSPSEngine()->pitchGimbalActuator.GetPosition());
-	target.spsYaw = static_cast<float>(GetSPSEngine()->yawGimbalActuator.GetPosition());
-	CaptureThrusterLevels(*this, th_1st, target.firstStage, FirstStageThrusterCount);
-	CaptureThrusterLevels(*this, th_2nd, target.secondStage, SecondStageThrusterCount);
-	target.thirdStage = EncodeThrusterLevel(*this, th_3rd[0]);
-	CaptureThrusterLevels(*this, th_ull, target.ullage, UllageThrusterCount);
-	CaptureThrusterLevels(*this, th_ver, target.vernier, VernierThrusterCount);
-	CaptureThrusterLevels(*this, th_aps_rot, target.aps, ApsThrusterCount);
-	CaptureThrusterLevels(*this, th_aps_ull, target.apsUllage, ApsUllageThrusterCount);
-	CaptureThrusterLevels(*this, th_sep, target.separation, SeparationThrusterCount);
-	CaptureThrusterLevels(*this, th_sep2, target.separation2, SeparationThrusterCount);
-	CaptureThrusterLevels(*this, th_lem, target.les, LesThrusterCount);
-	target.pitchControlMotor = EncodeThrusterLevel(*this, th_pcm);
+	ReplicatedPresentation &presentation = target.replicated;
+	CaptureThrusterLevels(*this, th_rcs_a + 1, presentation.smRcs, 4);
+	CaptureThrusterLevels(*this, th_rcs_b + 1, presentation.smRcs + 4, 4);
+	CaptureThrusterLevels(*this, th_rcs_c + 1, presentation.smRcs + 8, 4);
+	CaptureThrusterLevels(*this, th_rcs_d + 1, presentation.smRcs + 12, 4);
+	CaptureThrusterLevels(*this, th_att_cm, presentation.cmRcs, CmRcsThrusterCount);
+	presentation.sps = EncodeThrusterLevel(*this, th_sps[0]);
+	presentation.spsPitch = static_cast<float>(GetSPSEngine()->pitchGimbalActuator.GetPosition());
+	presentation.spsYaw = static_cast<float>(GetSPSEngine()->yawGimbalActuator.GetPosition());
+	CaptureThrusterLevels(*this, th_1st, presentation.firstStage, FirstStageThrusterCount);
+	CaptureThrusterLevels(*this, th_2nd, presentation.secondStage, SecondStageThrusterCount);
+	presentation.thirdStage = EncodeThrusterLevel(*this, th_3rd[0]);
+	CaptureThrusterLevels(*this, th_ull, presentation.ullage, UllageThrusterCount);
+	CaptureThrusterLevels(*this, th_ver, presentation.vernier, VernierThrusterCount);
+	CaptureThrusterLevels(*this, th_aps_rot, presentation.aps, ApsThrusterCount);
+	CaptureThrusterLevels(*this, th_aps_ull, presentation.apsUllage, ApsUllageThrusterCount);
+	CaptureThrusterLevels(*this, th_sep, presentation.separation, SeparationThrusterCount);
+	CaptureThrusterLevels(*this, th_sep2, presentation.separation2, SeparationThrusterCount);
+	CaptureThrusterLevels(*this, th_lem, presentation.les, LesThrusterCount);
+	presentation.pitchControlMotor = EncodeThrusterLevel(*this, th_pcm);
+	target.missionTime = MissionTime;
+	presentation.ambientSounds = 0;
+	if (CabinFansActive())
+		presentation.ambientSounds |= CabinFansSoundBit;
+	if (SuitCompressor1->IsOn())
+		presentation.ambientSounds |= SuitCompressor1SoundBit;
+	if (SuitCompressor2->IsOn())
+		presentation.ambientSounds |= SuitCompressor2SoundBit;
+	presentation.abortLight = AbortLightLogic();
+	target.liftoffLightPower = secs.LiftoffLightPower();
+	target.noAutoAbortLightPower = secs.NoAutoAbortLightPower();
+	presentation.sideHatchOpen = SideHatch.IsOpen();
 }
 
 ProviderResult Saturn::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context)
 {
-	if (std::strcmp(groupKey, ApolloTimeGroupKey) == 0) {
-		writer.WriteScalar(MissionTime);
-		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
-	}
 	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
 		for (unsigned int index = 0; index < ChecklistEventCount; index++)
 			writer.WriteScalar(eventControl.*ChecklistEventFields[index]);
 		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
 	}
-	if (std::strcmp(groupKey, AmbientSoundsGroupKey) == 0) {
-		std::uint8_t state = 0;
-		if (CabinFansActive())
-			state |= CabinFansSoundBit;
-		if (SuitCompressor1->IsOn())
-			state |= SuitCompressor1SoundBit;
-		if (SuitCompressor2->IsOn())
-			state |= SuitCompressor2SoundBit;
-		writer.WriteScalar(state, AmbientSoundBitCount);
-		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
-	}
-	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0)
+	if (std::strcmp(groupKey, PresentationGroupKey) != 0)
 		return ProjectApolloConnectorVessel::Capture(groupKey, writer, context);
 
-	ExternalVisualPresentation presentation;
-	CaptureExternalVisualPresentation(presentation);
-	WriteThrusterLevels(writer, presentation.smRcs);
-	WriteThrusterLevels(writer, presentation.cmRcs);
-	writer.WriteScalar(presentation.sps, 8)
-		.WriteScalar(presentation.spsPitch)
-		.WriteScalar(presentation.spsYaw);
-	WriteThrusterLevels(writer, presentation.firstStage);
-	WriteThrusterLevels(writer, presentation.secondStage);
-	writer.WriteScalar(presentation.thirdStage, 8);
-	WriteThrusterLevels(writer, presentation.ullage);
-	WriteThrusterLevels(writer, presentation.vernier);
-	WriteThrusterLevels(writer, presentation.aps);
-	WriteThrusterLevels(writer, presentation.apsUllage);
-	WriteThrusterLevels(writer, presentation.separation);
-	WriteThrusterLevels(writer, presentation.separation2);
-	WriteThrusterLevels(writer, presentation.les);
-	writer.WriteScalar(presentation.pitchControlMotor, 8);
+	PresentationPayload payload;
+	CapturePresentation(payload);
+	WriteThrusterLevels(writer, payload.replicated.smRcs);
+	WriteThrusterLevels(writer, payload.replicated.cmRcs);
+	writer.WriteScalar(payload.replicated.sps, 8)
+		.WriteScalar(payload.replicated.spsPitch)
+		.WriteScalar(payload.replicated.spsYaw);
+	WriteThrusterLevels(writer, payload.replicated.firstStage);
+	WriteThrusterLevels(writer, payload.replicated.secondStage);
+	writer.WriteScalar(payload.replicated.thirdStage, 8);
+	WriteThrusterLevels(writer, payload.replicated.ullage);
+	WriteThrusterLevels(writer, payload.replicated.vernier);
+	WriteThrusterLevels(writer, payload.replicated.aps);
+	WriteThrusterLevels(writer, payload.replicated.apsUllage);
+	WriteThrusterLevels(writer, payload.replicated.separation);
+	WriteThrusterLevels(writer, payload.replicated.separation2);
+	WriteThrusterLevels(writer, payload.replicated.les);
+	writer.WriteScalar(payload.replicated.pitchControlMotor, 8)
+		.WriteScalar(payload.missionTime)
+		.WriteScalar(payload.replicated.ambientSounds, AmbientSoundBitCount)
+		.WriteScalar(payload.replicated.abortLight)
+		.WriteScalar(payload.liftoffLightPower)
+		.WriteScalar(payload.noAutoAbortLightPower)
+		.WriteScalar(payload.replicated.sideHatchOpen);
 	return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
-}
-
-ProviderResult Saturn::ReadAmbientSoundState(const ReplicationReader &reader, std::uint8_t *target) const
-{
-	std::uint8_t decoded = 0;
-	reader.ReadScalar(decoded, AmbientSoundBitCount);
-	if (!reader.Finish())
-		return ProviderResult::Malformed;
-
-	if (target)
-		*target = decoded;
-	return ProviderResult::Success;
-}
-
-ProviderResult Saturn::ReadMissionTime(const ReplicationReader &reader, double *target) const
-{
-	double decoded;
-	reader.ReadScalar(decoded);
-	if (!reader.Finish())
-		return ProviderResult::Malformed;
-	if (!std::isfinite(decoded))
-		return ProviderResult::Rejected;
-
-	if (target)
-		*target = decoded;
-	return ProviderResult::Success;
 }
 
 ProviderResult Saturn::ReadChecklistEvents(const ReplicationReader &reader, SaturnEvents *target) const
@@ -1465,29 +1417,35 @@ ProviderResult Saturn::ReadChecklistEvents(const ReplicationReader &reader, Satu
 	return ProviderResult::Success;
 }
 
-ProviderResult Saturn::ReadExternalVisualPresentation(const ReplicationReader &reader, ExternalVisualPresentation *target) const
+ProviderResult Saturn::ReadPresentation(const ReplicationReader &reader, PresentationPayload *target) const
 {
-	ExternalVisualPresentation decoded;
-	ReadThrusterLevels(reader, decoded.smRcs);
-	ReadThrusterLevels(reader, decoded.cmRcs);
-	reader.ReadScalar(decoded.sps, 8)
-		.ReadScalar(decoded.spsPitch)
-		.ReadScalar(decoded.spsYaw);
-	ReadThrusterLevels(reader, decoded.firstStage);
-	ReadThrusterLevels(reader, decoded.secondStage);
-	reader.ReadScalar(decoded.thirdStage, 8);
-	ReadThrusterLevels(reader, decoded.ullage);
-	ReadThrusterLevels(reader, decoded.vernier);
-	ReadThrusterLevels(reader, decoded.aps);
-	ReadThrusterLevels(reader, decoded.apsUllage);
-	ReadThrusterLevels(reader, decoded.separation);
-	ReadThrusterLevels(reader, decoded.separation2);
-	ReadThrusterLevels(reader, decoded.les);
-	reader.ReadScalar(decoded.pitchControlMotor, 8);
+	PresentationPayload decoded;
+	ReadThrusterLevels(reader, decoded.replicated.smRcs);
+	ReadThrusterLevels(reader, decoded.replicated.cmRcs);
+	reader.ReadScalar(decoded.replicated.sps, 8)
+		.ReadScalar(decoded.replicated.spsPitch)
+		.ReadScalar(decoded.replicated.spsYaw);
+	ReadThrusterLevels(reader, decoded.replicated.firstStage);
+	ReadThrusterLevels(reader, decoded.replicated.secondStage);
+	reader.ReadScalar(decoded.replicated.thirdStage, 8);
+	ReadThrusterLevels(reader, decoded.replicated.ullage);
+	ReadThrusterLevels(reader, decoded.replicated.vernier);
+	ReadThrusterLevels(reader, decoded.replicated.aps);
+	ReadThrusterLevels(reader, decoded.replicated.apsUllage);
+	ReadThrusterLevels(reader, decoded.replicated.separation);
+	ReadThrusterLevels(reader, decoded.replicated.separation2);
+	ReadThrusterLevels(reader, decoded.replicated.les);
+	reader.ReadScalar(decoded.replicated.pitchControlMotor, 8)
+		.ReadScalar(decoded.missionTime)
+		.ReadScalar(decoded.replicated.ambientSounds, AmbientSoundBitCount)
+		.ReadScalar(decoded.replicated.abortLight)
+		.ReadScalar(decoded.liftoffLightPower)
+		.ReadScalar(decoded.noAutoAbortLightPower)
+		.ReadScalar(decoded.replicated.sideHatchOpen);
 	if (!reader.Finish())
 		return ProviderResult::Malformed;
-	if (!std::isfinite(decoded.spsPitch) || !std::isfinite(decoded.spsYaw) ||
-		decoded.spsPitch < -4.5f || decoded.spsPitch > 4.5f || decoded.spsYaw < -4.5f || decoded.spsYaw > 4.5f)
+	if (!std::isfinite(decoded.missionTime) || !std::isfinite(decoded.replicated.spsPitch) || !std::isfinite(decoded.replicated.spsYaw) ||
+		decoded.replicated.spsPitch < -4.5f || decoded.replicated.spsPitch > 4.5f || decoded.replicated.spsYaw < -4.5f || decoded.replicated.spsYaw > 4.5f)
 		return ProviderResult::Rejected;
 
 	if (target)
@@ -1497,38 +1455,20 @@ ProviderResult Saturn::ReadExternalVisualPresentation(const ReplicationReader &r
 
 ProviderResult Saturn::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
 {
-	if (std::strcmp(groupKey, ApolloTimeGroupKey) == 0) {
-		if (context.purpose == ApplyPurpose::RemoteInput)
-			return ProviderResult::Unsupported;
-		return ReadMissionTime(reader, NULL);
-	}
 	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
 		if (context.purpose == ApplyPurpose::RemoteInput)
 			return ProviderResult::Unsupported;
 		return ReadChecklistEvents(reader, NULL);
 	}
-	if (std::strcmp(groupKey, AmbientSoundsGroupKey) == 0) {
-		if (context.purpose == ApplyPurpose::RemoteInput)
-			return ProviderResult::Unsupported;
-		return ReadAmbientSoundState(reader, NULL);
-	}
-	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0)
+	if (std::strcmp(groupKey, PresentationGroupKey) != 0)
 		return ProjectApolloConnectorVessel::Validate(groupKey, reader, context);
 	if (context.purpose == ApplyPurpose::RemoteInput)
 		return ProviderResult::Unsupported;
-	return ReadExternalVisualPresentation(reader, NULL);
+	return ReadPresentation(reader, NULL);
 }
 
 void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
 {
-	if (std::strcmp(groupKey, ApolloTimeGroupKey) == 0) {
-		if (context.purpose == ApplyPurpose::RemoteInput)
-			return;
-		if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !IsMultiplayerReplica())
-			return;
-		ReadMissionTime(reader, &MissionTime);
-		return;
-	}
 	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
 		if (context.purpose == ApplyPurpose::RemoteInput)
 			return;
@@ -1537,19 +1477,24 @@ void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const 
 		ReadChecklistEvents(reader, &eventControl);
 		return;
 	}
-	if (std::strcmp(groupKey, AmbientSoundsGroupKey) == 0) {
-		if (context.purpose == ApplyPurpose::RemoteInput)
-			return;
-		ReadAmbientSoundState(reader, &*replicatedAmbientSounds);
-		return;
-	}
-	if (std::strcmp(groupKey, ExternalPropulsionGroupKey) != 0) {
+	if (std::strcmp(groupKey, PresentationGroupKey) != 0) {
 		ProjectApolloConnectorVessel::Apply(groupKey, reader, context);
 		return;
 	}
 	if (context.purpose == ApplyPurpose::RemoteInput)
 		return;
-	ReadExternalVisualPresentation(reader, &*replicatedExternalVisuals);
+
+	PresentationPayload payload;
+	if (ReadPresentation(reader, &payload) != ProviderResult::Success)
+		return;
+	// Store only; the replica role controls when derived values affect presentation.
+	*replicatedPresentation = payload.replicated;
+	secs.SetReplicatedLightPresentation(payload.liftoffLightPower, payload.noAutoAbortLightPower);
+	if (context.purpose == ApplyPurpose::Baseline || IsMultiplayerReplica())
+		MissionTime = payload.missionTime;
+	// Baselines establish the guaranteed initial hatch state without replaying an animation.
+	if (context.purpose == ApplyPurpose::Baseline)
+		SideHatch.SetReplicatedOpen(payload.replicated.sideHatchOpen, false);
 }
 
 void Saturn::ApplyAmbientSoundState(std::uint8_t state)
@@ -1561,7 +1506,7 @@ void Saturn::ApplyAmbientSoundState(std::uint8_t state)
 	SetSuitCompressorSound((state & SuitCompressor1SoundBit) != 0, (state & SuitCompressor2SoundBit) != 0);
 }
 
-void Saturn::ApplyExternalVisualPresentation(const ExternalVisualPresentation &presentation, ThrusterPresentationMode mode)
+void Saturn::ApplyExternalVisualPresentation(const ReplicatedPresentation &presentation, ThrusterPresentationMode mode)
 {
 	const bool clearLevels = mode == ThrusterPresentationMode::ClearForPhysics;
 	SetThrusterLevels(*this, th_rcs_a + 1, presentation.smRcs, 4, clearLevels);
@@ -1615,27 +1560,28 @@ void Saturn::AssignReplicaThrusterResource()
 
 void Saturn::ClearReplicaThrusterLevels()
 {
-	if (replicatedExternalVisuals.IsActive())
-		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::ClearForPhysics);
+	if (replicatedPresentation.IsActive())
+		ApplyExternalVisualPresentation(*replicatedPresentation, ThrusterPresentationMode::ClearForPhysics);
 }
 
 void Saturn::PresentReplicaState()
 {
-	if (replicatedExternalVisuals.IsActive())
-		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::Render);
-	if (replicatedAmbientSounds.IsActive())
-		ApplyAmbientSoundState(*replicatedAmbientSounds);
+	if (replicatedPresentation.IsActive()) {
+		ApplyExternalVisualPresentation(*replicatedPresentation, ThrusterPresentationMode::Render);
+		ApplyAmbientSoundState(replicatedPresentation->ambientSounds);
+		SideHatch.SetReplicatedOpen(replicatedPresentation->sideHatchOpen, true);
+	}
 }
 
 void Saturn::OnRoleChanged(ReplicationRole role)
 {
 	ProjectApolloConnectorVessel::OnRoleChanged(role);
-	if (replicatedExternalVisuals.IsActive() && role != ReplicationRole::Replica)
-		ApplyExternalVisualPresentation(*replicatedExternalVisuals, ThrusterPresentationMode::ClearForPhysics);
+	if (replicatedPresentation.IsActive() && role != ReplicationRole::Replica)
+		ApplyExternalVisualPresentation(*replicatedPresentation, ThrusterPresentationMode::ClearForPhysics);
 	if (role == ReplicationRole::Replica)
 		AssignReplicaThrusterResource();
-	replicatedExternalVisuals.SetActive(role == ReplicationRole::Replica);
-	replicatedAmbientSounds.SetActive(role == ReplicationRole::Replica);
+	replicatedPresentation.SetActive(role == ReplicationRole::Replica);
+	secs.SetReplicationPresentationActive(role == ReplicationRole::Replica);
 }
 
 void Saturn::RegisterReplicationProviders()
@@ -3660,7 +3606,7 @@ void Saturn::SetStage(int s)
 		iuCommandConnector.Disconnect();
 		sivbCommandConnector.Disconnect();
 	}
-	if (replicatedExternalVisuals.IsActive())
+	if (replicatedPresentation.IsActive())
 		AssignReplicaThrusterResource();
 }
 
@@ -3901,6 +3847,9 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 		// Needed to copy replicated EDA values to display on FDAI
 		FDAITimestep(simt, simdt);
 		ems.ReplicaTimestep(simdt);
+		// Keep the authority-owned side hatch and protective-cover animations moving locally.
+		SideHatch.Timestep(simdt);
+		BPC.Timestep(simdt);
 	}
 
 	if(stage < LAUNCH_STAGE_SIVB) {
@@ -4700,7 +4649,7 @@ void Saturn::AddRCS_S4B()
 		AddExhaust(th_aps_ull[0], 7, 0.15, SIVBRCSTex);
 		AddExhaust(th_aps_ull[1], 7, 0.15, SIVBRCSTex);
 	}
-	if (replicatedExternalVisuals.IsActive())
+	if (replicatedPresentation.IsActive())
 		AssignReplicaThrusterResource();
 }
 

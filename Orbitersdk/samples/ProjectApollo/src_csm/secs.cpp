@@ -1753,15 +1753,25 @@ bool SECS::AbortLightPowerB()
 
 bool SECS::LiftoffLightPower()
 {
-	return (MESCA.EDSLiftoffCircuitPower() || MESCB.EDSLiftoffCircuitPower());
+	const bool powered = MESCA.EDSLiftoffCircuitPower() || MESCB.EDSLiftoffCircuitPower();
+	return replicatedLightPresentation.OverrideIfReplica(&ReplicatedLightPresentation::liftoffLightPower, powered);
 }
 
 bool SECS::NoAutoAbortLightPower()
 {
-	if ((MESCA.EDSLiftoffCircuitPower() && !MESCB.GetAutoAbortEnableRelay()) || (MESCB.EDSLiftoffCircuitPower() && !MESCA.GetAutoAbortEnableRelay()))
-		return true;
+	const bool powered = (MESCA.EDSLiftoffCircuitPower() && !MESCB.GetAutoAbortEnableRelay()) || (MESCB.EDSLiftoffCircuitPower() && !MESCA.GetAutoAbortEnableRelay());
+	return replicatedLightPresentation.OverrideIfReplica(&ReplicatedLightPresentation::noAutoAbortLightPower, powered);
+}
 
-	return false;
+void SECS::SetReplicatedLightPresentation(bool liftoffLightPower, bool noAutoAbortLightPower)
+{
+	replicatedLightPresentation->liftoffLightPower = liftoffLightPower;
+	replicatedLightPresentation->noAutoAbortLightPower = noAutoAbortLightPower;
+}
+
+void SECS::SetReplicationPresentationActive(bool active)
+{
+	replicatedLightPresentation.SetActive(active);
 }
 
 SMJC *SECS::GetSMJC(bool isSysA)

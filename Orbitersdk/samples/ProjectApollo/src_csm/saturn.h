@@ -4568,7 +4568,7 @@ protected:
 		ThrusterLevelCount = 83
 	};
 
-	struct ExternalVisualPresentation
+	struct ReplicatedPresentation
 	{
 		std::uint8_t smRcs[SmRcsThrusterCount];
 		std::uint8_t cmRcs[CmRcsThrusterCount];
@@ -4586,6 +4586,20 @@ protected:
 		std::uint8_t separation2[SeparationThrusterCount];
 		std::uint8_t les[LesThrusterCount];
 		std::uint8_t pitchControlMotor;
+		std::uint8_t ambientSounds;
+		bool abortLight;
+		bool sideHatchOpen;
+	};
+
+	
+	struct PresentationPayload
+	{
+		ReplicatedPresentation replicated;
+		// Mission time is applied directly and needs no copy
+		double missionTime;
+		// Those are passed to the SECS class and only here to save overhead
+		bool liftoffLightPower;
+		bool noAutoAbortLightPower;
 	};
 
 	enum class ThrusterPresentationMode
@@ -4594,19 +4608,16 @@ protected:
 		Render
 	};
 
-	void CaptureExternalVisualPresentation(ExternalVisualPresentation &target);
-	ProviderResult ReadExternalVisualPresentation(const ReplicationReader &reader, ExternalVisualPresentation *target) const;
-	void ApplyExternalVisualPresentation(const ExternalVisualPresentation &presentation, ThrusterPresentationMode mode);
-	ProviderResult ReadAmbientSoundState(const ReplicationReader &reader, std::uint8_t *target) const;
+	void CapturePresentation(PresentationPayload &target);
+	ProviderResult ReadPresentation(const ReplicationReader &reader, PresentationPayload *target) const;
+	void ApplyExternalVisualPresentation(const ReplicatedPresentation &presentation, ThrusterPresentationMode mode);
 	void ApplyAmbientSoundState(std::uint8_t state);
-	ProviderResult ReadMissionTime(const ReplicationReader &reader, double *target) const;
 	ProviderResult ReadChecklistEvents(const ReplicationReader &reader, SaturnEvents *target) const;
 	void AssignReplicaThrusterResource();
 	void ClearReplicaThrusterLevels();
 	void PresentReplicaState();
 
-	ReplicaOverrideData<ExternalVisualPresentation> replicatedExternalVisuals;
-	ReplicaOverrideData<std::uint8_t> replicatedAmbientSounds;
+	ReplicaOverrideData<ReplicatedPresentation> replicatedPresentation;
 	PROPELLANT_HANDLE replicaThrusterResource = NULL;
 
 	PSTREAM_HANDLE dyemarker;
