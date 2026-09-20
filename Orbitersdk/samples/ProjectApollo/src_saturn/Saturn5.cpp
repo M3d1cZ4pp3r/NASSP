@@ -478,12 +478,9 @@ void SaturnV::Timestep(double simt, double simdt, double mjd)
 	// S-IC/S-II separation
 	//
 
-	if (!Failures.GetFailure(CSMFailures_SII_Auto_Sep_Fail) && SICSIISepPyros.Blown() && stage == LAUNCH_STAGE_ONE)
+	if (!IsMultiplayerReplica() && !Failures.GetFailure(CSMFailures_SII_Auto_Sep_Fail) && SICSIISepPyros.Blown() && stage == LAUNCH_STAGE_ONE)
 	{
-		SeparateStage(LAUNCH_STAGE_TWO);
-		SetStage(LAUNCH_STAGE_TWO);
-		ActivateStagingVent();
-		NextMissionEventTime = MissionTime + 1.7;
+		ApplyStageTransition(StageEventKind::S1C, LAUNCH_STAGE_TWO);
 	}
 
 	//Deactivate S-IC/S-II staging vent
@@ -496,41 +493,35 @@ void SaturnV::Timestep(double simt, double simdt, double mjd)
 	// S-II Interstage separation
 	//
 
-	if (SIIInterstagePyros.Blown() && stage == LAUNCH_STAGE_TWO)
+	if (!IsMultiplayerReplica() && SIIInterstagePyros.Blown() && stage == LAUNCH_STAGE_TWO)
 	{
-		SeparateStage(LAUNCH_STAGE_TWO_ISTG_JET);
-		SetStage(LAUNCH_STAGE_TWO_ISTG_JET);
+		ApplyStageTransition(StageEventKind::Interstage, LAUNCH_STAGE_TWO_ISTG_JET);
 	}
 
 	//
 	// S-II/S-IVB separation
 	//
 
-	if (SIISIVBSepPyros.Blown() && stage < LAUNCH_STAGE_SIVB)
+	if (!IsMultiplayerReplica() && SIISIVBSepPyros.Blown() && stage < LAUNCH_STAGE_SIVB)
 	{
-		SPUShiftS.done(); // Make sure it's done
-		SeparateStage(LAUNCH_STAGE_SIVB);
-		SetStage(LAUNCH_STAGE_SIVB);
-		AddRCS_S4B();
+		ApplyStageTransition(StageEventKind::S2, LAUNCH_STAGE_SIVB);
 	}
 
 	//
 	// CSM/LV separation
 	//
 
-	if (!Failures.GetFailure(CSMFailures_CSM_LV_Separation_Failure) && CSMLVPyros.Blown() && stage < CSM_LEM_STAGE) {
-		SeparateStage(CSM_LEM_STAGE);
-		SetStage(CSM_LEM_STAGE);
+	if (!IsMultiplayerReplica() && !Failures.GetFailure(CSMFailures_CSM_LV_Separation_Failure) && CSMLVPyros.Blown() && stage < CSM_LEM_STAGE) {
+		ApplyStageTransition((stage == LAUNCH_STAGE_SIVB || stage == STAGE_ORBIT_SIVB) ? StageEventKind::SIVB : StageEventKind::Abort, CSM_LEM_STAGE);
 	}
 
 	//
 	// CM/SM separation pyros
 	//
 
-	if (CMSMPyros.Blown() && stage < CM_STAGE)
+	if (!IsMultiplayerReplica() && CMSMPyros.Blown() && stage < CM_STAGE)
 	{
-		SeparateStage(CM_STAGE);
-		SetStage(CM_STAGE);
+		ApplyStageTransition(StageEventKind::ServiceModule, CM_STAGE);
 	}
 }
 

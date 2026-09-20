@@ -35,6 +35,7 @@
 
 #include "powersource.h"
 #include "connector.h"
+#include "NasspReplicationBridge.h"
 #include "iu.h"
 #include "sivbsystems.h"
 
@@ -201,6 +202,9 @@ SLAPanelDeployInitiator("SLA-Panel-Deploy-Initiator", Panelsdk),
 inertialData(this)
 {
 	PanelSDKInitalised = false;
+	ReplicationHub &hub = GetReplicationHub();
+	if (hub.Register(*this) == ReplicationHub::RegistrationResult::Success)
+		hub.SealCatalog();
 
 	InitS4b();
 }
@@ -635,6 +639,10 @@ void SIVB::SetS4b()
 
 void SIVB::clbkPreStep(double simt, double simdt, double mjd)
 {
+	UpdateReplicatedKinematics(simdt);
+	if (IsMultiplayerReplica())
+		return;
+
 	if (FirstTimestep)
 	{
 		FirstTimestep = false;
@@ -912,6 +920,8 @@ void SIVB::clbkPreStep(double simt, double simdt, double mjd)
 
 void SIVB::clbkPostStep(double simt, double simdt, double mjd)
 {
+	if (IsMultiplayerReplica())
+		return;
 	inertialData.Timestep(simdt);
 	iu->PostStep(simt, simdt, mjd);
 }
@@ -1546,6 +1556,13 @@ void SIVB::clbkPostCreation()
 		}
 	}
 	CreateAirfoils();
+}
+
+int SIVB::clbkGeneric(int msgid, int prm, void *context)
+{
+	if (msgid == nasspmp_api::MessageId)
+		return NasspReplicationBridge::HandleRequest(GetReplicationHub(), prm, context);
+	return 0;
 }
 
 void SIVB::clbkFocusChanged(bool getfocus, OBJHANDLE hNewVessel, OBJHANDLE hOldVessel)

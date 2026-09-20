@@ -198,9 +198,9 @@ public:
 	void SISwitchSelector(int channel);
 	void SIISwitchSelector(int channel);
 	void SIVBSwitchSelector(int channel);
-
 	void SeparateStage(int stage);
 	void SetStage(int stage);
+
 	void JettisonNosecap();
 	void DeploySLAPanel();
 

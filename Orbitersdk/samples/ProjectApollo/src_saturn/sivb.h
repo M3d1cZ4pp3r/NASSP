@@ -261,6 +261,7 @@ public:
 	///
 	void clbkDockEvent(int dock, OBJHANDLE connected);
 	void clbkPostCreation();
+	int clbkGeneric(int msgid, int prm, void *context);
 
 	void clbkFocusChanged(bool getfocus, OBJHANDLE hNewVessel, OBJHANDLE hOldVessel);
 	void clbkGetRadiationForce(const VECTOR3& mflux, VECTOR3& F, VECTOR3& pos);

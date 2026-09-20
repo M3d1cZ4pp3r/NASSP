@@ -103,7 +103,7 @@ protected:
 	void LoadSIVB(FILEHANDLE scn);
 	void SaveSI(FILEHANDLE scn);
 	void LoadSI(FILEHANDLE scn);
-	void SeparateStage (int stage);
+	void SeparateStage (int stage, StageEventKind kind);
 	void CheckSaturnSystemsState();
 	void DoFirstTimestep(double simt);
 	void Timestep (double simt, double simdt, double mjd);

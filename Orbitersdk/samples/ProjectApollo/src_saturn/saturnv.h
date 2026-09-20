@@ -119,7 +119,7 @@ private:
 	MESHHANDLE GetInterstageMesh();
 	void MoveEVA();
 
-	void SeparateStage (int stage);
+	void SeparateStage (int stage, StageEventKind kind);
 	void CheckSaturnSystemsState();
 
 	void SetVehicleStats();

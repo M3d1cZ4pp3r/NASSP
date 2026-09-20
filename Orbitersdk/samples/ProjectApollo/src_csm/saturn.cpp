@@ -81,6 +81,8 @@ namespace
 {
 const char *PresentationGroupKey = "presentation";
 const char *ChecklistEventsGroupKey = "checklist_events";
+const char *StageTransitionGroupKey = "stage_transition";
+const std::uint32_t StageTransitionPayloadBytes = static_cast<std::uint32_t>(2 + 10 * sizeof(double));
 const unsigned int AmbientSoundBitCount = 3;
 const std::uint8_t CabinFansSoundBit = 1 << 0;
 const std::uint8_t SuitCompressor1SoundBit = 1 << 1;
@@ -103,9 +105,23 @@ double SaturnEvents::*const ChecklistEventFields[] = {
 };
 const unsigned int ChecklistEventCount = sizeof(ChecklistEventFields) / sizeof(ChecklistEventFields[0]);
 
-std::uint8_t EncodeThrusterLevel(Saturn &saturn, THRUSTER_HANDLE thruster)
+// Stage reconfiguration invalidates handles in arrays which are not repopulated
+// for the new stage. Never pass one of those stale handles back into Orbiter.
+bool IsCurrentThruster(Saturn &saturn, THRUSTER_HANDLE thruster)
 {
 	if (!thruster)
+		return false;
+	const DWORD thrusterCount = saturn.GetThrusterCount();
+	for (DWORD index = 0; index < thrusterCount; index++) {
+		if (saturn.GetThrusterHandleByIndex(index) == thruster)
+			return true;
+	}
+	return false;
+}
+
+std::uint8_t EncodeThrusterLevel(Saturn &saturn, THRUSTER_HANDLE thruster)
+{
+	if (!IsCurrentThruster(saturn, thruster))
 		return 0;
 	const double level = saturn.GetThrusterLevel(thruster);
 	const double boundedLevel = (std::max)(0.0, (std::min)(1.0, level));
@@ -121,7 +137,7 @@ void CaptureThrusterLevels(Saturn &saturn, THRUSTER_HANDLE const *thrusters, std
 void SetThrusterLevels(Saturn &saturn, THRUSTER_HANDLE const *thrusters, const std::uint8_t *levels, unsigned int count, bool clearLevels)
 {
 	for (unsigned int index = 0; index < count; index++) {
-		if (thrusters[index])
+		if (IsCurrentThruster(saturn, thrusters[index]))
 			saturn.SetThrusterLevel(thrusters[index], clearLevels ? 0.0 : levels[index] / 255.0);
 	}
 }
@@ -129,7 +145,7 @@ void SetThrusterLevels(Saturn &saturn, THRUSTER_HANDLE const *thrusters, const s
 void SetThrusterResources(Saturn &saturn, THRUSTER_HANDLE const *thrusters, unsigned int count, PROPELLANT_HANDLE resource)
 {
 	for (unsigned int index = 0; index < count; index++) {
-		if (thrusters[index])
+		if (IsCurrentThruster(saturn, thrusters[index]))
 			saturn.SetThrusterResource(thrusters[index], resource);
 	}
 }
@@ -1283,6 +1299,10 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 	if (baseResult != ProviderResult::Success)
 		return baseResult;
 
+	// Saturn presentation group: Contains everything needed for visual/audible effects on the client:
+	// Thrusters / Engines, compressor/fans etc.
+	// Mission time is special, it is necessary for correct checklist operation
+
 	ReplicationSchemaBuilder schema;
 	schema.AddString("saturn-presentation-v1");
 	schema.AddString("sm_rcs:uint8x16");
@@ -1312,6 +1332,9 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 	presentation.maximumPayloadBytes = ThrusterLevelCount + 2 * sizeof(float) + sizeof(double) + 1;
 	catalog.AddGroup(presentation);
 
+	// Checklist group. TODO: May move to checklist classes
+	// Mainly needed to sync events needed to trigger next checklist
+
 	ReplicationSchemaBuilder checklistEventSchema;
 	checklistEventSchema.AddString("saturn-checklist-events-v1");
 	checklistEventSchema.AddString("backup_crew_prelaunch:float64;prime_crew_prelaunch:float64;second_stage_staging:float64;tower_jettison:float64;sivb_stage_staging:float64;earth_orbit_insertion:float64;tli:float64;tli_done:float64;csm_lv_separation:float64;csm_lv_separation_done:float64;payload_extraction:float64;cm_sm_separation:float64;cm_sm_separation_done:float64;splashdown:float64");
@@ -1324,7 +1347,31 @@ ProviderResult Saturn::Describe(ReplicationCatalogBuilder &catalog) const
 	checklistEvents.maximumPayloadBytes = ChecklistEventCount * sizeof(double);
 	catalog.AddGroup(checklistEvents);
 
+	// Stage transition group: Used to trigger staging events on the client
+
+	ReplicationSchemaBuilder stageTransitionSchema;
+	stageTransitionSchema.AddString("saturn-stage-transition-v1");
+	stageTransitionSchema.AddString("stage_event_kind:uint4;target_stage:uint8;spawns_entity:bool");
+	stageTransitionSchema.AddString("position:float64x3;velocity:float64x3;orientation_quaternion:float64x4");
+
+	ReplicationGroupDescriptor stageTransition;
+	stageTransition.key = StageTransitionGroupKey;
+	stageTransition.schemaId = stageTransitionSchema.SchemaId();
+	stageTransition.delivery = ReplicationDelivery::Reliable;
+	stageTransition.replicateChanges = true;
+	stageTransition.maximumPayloadBytes = StageTransitionPayloadBytes;
+	catalog.AddGroup(stageTransition);
+
 	return ProviderResult::Success;
+}
+
+bool Saturn::TryGetRevision(const char *groupKey, Revision &revision) const
+{
+	// Only capture and send a staging event once it occured
+	if (std::strcmp(groupKey, StageTransitionGroupKey) != 0)
+		return false;
+	revision = StageEventRevision();
+	return true;
 }
 
 void Saturn::CapturePresentation(PresentationPayload &target)
@@ -1365,6 +1412,18 @@ void Saturn::CapturePresentation(PresentationPayload &target)
 
 ProviderResult Saturn::Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context)
 {
+	if (std::strcmp(groupKey, StageTransitionGroupKey) == 0) {
+		const StageTransition &transition = LatestStageEvent();
+		writer.WriteScalar(static_cast<std::uint8_t>(transition.kind), 4)
+			.WriteScalar(transition.targetStage, 8)
+			.WriteScalar(transition.spawnsEntity)
+			.WriteScalar(transition.position.x).WriteScalar(transition.position.y).WriteScalar(transition.position.z)
+			.WriteScalar(transition.velocity.x).WriteScalar(transition.velocity.y).WriteScalar(transition.velocity.z)
+			.WriteScalar(transition.orientation.x).WriteScalar(transition.orientation.y)
+			.WriteScalar(transition.orientation.z).WriteScalar(transition.orientation.w);
+
+		return writer ? ProviderResult::Success : ProviderResult::BufferTooSmall;
+	}
 	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
 		for (unsigned int index = 0; index < ChecklistEventCount; index++)
 			writer.WriteScalar(eventControl.*ChecklistEventFields[index]);
@@ -1417,6 +1476,53 @@ ProviderResult Saturn::ReadChecklistEvents(const ReplicationReader &reader, Satu
 	return ProviderResult::Success;
 }
 
+ProviderResult Saturn::ReadStageTransition(const ReplicationReader &reader, StageTransition *target) const
+{
+	StageTransition decoded;
+	std::uint8_t eventKind = 0;
+
+	reader.ReadScalar(eventKind, 4)
+		.ReadScalar(decoded.targetStage, 8)
+		.ReadScalar(decoded.spawnsEntity)
+		.ReadScalar(decoded.position.x).ReadScalar(decoded.position.y).ReadScalar(decoded.position.z)
+		.ReadScalar(decoded.velocity.x).ReadScalar(decoded.velocity.y).ReadScalar(decoded.velocity.z)
+		.ReadScalar(decoded.orientation.x).ReadScalar(decoded.orientation.y)
+		.ReadScalar(decoded.orientation.z).ReadScalar(decoded.orientation.w);
+
+	if (!reader.Finish())
+		return ProviderResult::Malformed;
+	if (eventKind > static_cast<std::uint8_t>(StageEventKind::Liftoff))
+		return ProviderResult::Rejected;
+
+	decoded.kind = static_cast<StageEventKind>(eventKind);
+	const bool validTargetStage = decoded.targetStage == LAUNCH_STAGE_ONE || decoded.targetStage == LAUNCH_STAGE_TWO || decoded.targetStage == LAUNCH_STAGE_TWO_ISTG_JET ||
+		decoded.targetStage == LAUNCH_STAGE_SIVB || decoded.targetStage == STAGE_ORBIT_SIVB ||
+		decoded.targetStage == CSM_LEM_STAGE || decoded.targetStage == CM_STAGE;
+
+	if ((decoded.kind == StageEventKind::None && decoded.targetStage != 0) ||
+		(decoded.kind != StageEventKind::None && !validTargetStage))
+		return ProviderResult::Rejected;
+	if (decoded.spawnsEntity != (decoded.kind == StageEventKind::SIVB))
+		return ProviderResult::Rejected;
+	if (!std::isfinite(decoded.position.x) || !std::isfinite(decoded.position.y) || !std::isfinite(decoded.position.z) ||
+		!std::isfinite(decoded.velocity.x) || !std::isfinite(decoded.velocity.y) || !std::isfinite(decoded.velocity.z) ||
+		!std::isfinite(decoded.orientation.x) || !std::isfinite(decoded.orientation.y) ||
+		!std::isfinite(decoded.orientation.z) || !std::isfinite(decoded.orientation.w))
+		return ProviderResult::Rejected;
+
+	const double quaternionLength = std::sqrt(decoded.orientation.x * decoded.orientation.x +
+		decoded.orientation.y * decoded.orientation.y + decoded.orientation.z * decoded.orientation.z +
+		decoded.orientation.w * decoded.orientation.w);
+	if (quaternionLength < 0.5 || quaternionLength > 1.5)
+		return ProviderResult::Rejected;
+
+	decoded.orientation = nasspmp_kinematics::Normalize(decoded.orientation);
+
+	if (target)
+		*target = decoded;
+	return ProviderResult::Success;
+}
+
 ProviderResult Saturn::ReadPresentation(const ReplicationReader &reader, PresentationPayload *target) const
 {
 	PresentationPayload decoded;
@@ -1455,6 +1561,11 @@ ProviderResult Saturn::ReadPresentation(const ReplicationReader &reader, Present
 
 ProviderResult Saturn::Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const
 {
+	if (std::strcmp(groupKey, StageTransitionGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return ProviderResult::Unsupported;
+		return ReadStageTransition(reader, NULL);
+	}
 	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
 		if (context.purpose == ApplyPurpose::RemoteInput)
 			return ProviderResult::Unsupported;
@@ -1469,6 +1580,24 @@ ProviderResult Saturn::Validate(const char *groupKey, const ReplicationReader &r
 
 void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context)
 {
+	if (std::strcmp(groupKey, StageTransitionGroupKey) == 0) {
+		if (context.purpose == ApplyPurpose::RemoteInput)
+			return;
+		if (context.purpose == ApplyPurpose::AuthoritativeUpdate && !IsMultiplayerReplica())
+			return;
+
+		StageTransition transition;
+		if (ReadStageTransition(reader, &transition) != ProviderResult::Success)
+			return;
+
+		// A baseline describes history that the loaded scenario has already applied. (Hard assumption for now)
+		if (context.purpose != ApplyPurpose::Baseline && transition.kind != StageEventKind::None) {
+			BeginReplicatedStageEvent(transition);
+			ApplyStageTransition(transition.kind, transition.targetStage);
+			EndReplicatedStageEvent();
+		}
+		return;
+	}
 	if (std::strcmp(groupKey, ChecklistEventsGroupKey) == 0) {
 		if (context.purpose == ApplyPurpose::RemoteInput)
 			return;
@@ -1495,6 +1624,51 @@ void Saturn::Apply(const char *groupKey, const ReplicationReader &reader, const 
 	// Baselines establish the guaranteed initial hatch state without replaying an animation.
 	if (context.purpose == ApplyPurpose::Baseline)
 		SideHatch.SetReplicatedOpen(payload.replicated.sideHatchOpen, false);
+}
+
+void Saturn::ApplyStageTransition(StageEventKind kind, int targetStage)
+{
+	if (IsMultiplayerReplica() && !IsApplyingReplicatedStageEvent())
+		return;
+
+	switch (kind) {
+	case StageEventKind::S1C:
+		SeparateStage(targetStage, kind);
+		SetStage(targetStage);
+		ActivateStagingVent();
+		NextMissionEventTime = MissionTime + 1.7;
+		break;
+	case StageEventKind::S1B:
+		SeparateStage(targetStage, kind);
+		SetStage(targetStage);
+		AddRCS_S4B();
+		break;
+	case StageEventKind::Interstage:
+		SeparateStage(targetStage, kind);
+		SetStage(targetStage);
+		break;
+	case StageEventKind::S2:
+		SPUShiftS.done();
+		SeparateStage(targetStage, kind);
+		SetStage(targetStage);
+		AddRCS_S4B();
+		break;
+	case StageEventKind::SIVB:
+	case StageEventKind::ServiceModule:
+	case StageEventKind::CommandModule:
+	case StageEventKind::Abort:
+		SeparateStage(targetStage, kind);
+		SetStage(targetStage);
+		break;
+	case StageEventKind::PayloadSeparation:
+		StartSeparationPyros();
+		break;
+	case StageEventKind::Liftoff:
+		SetStage(targetStage);
+		break;
+	case StageEventKind::None:
+		break;
+	}
 }
 
 void Saturn::ApplyAmbientSoundState(std::uint8_t state)
@@ -3563,6 +3737,14 @@ void Saturn::DestroyStages(double simt)
 void Saturn::SetStage(int s)
 
 {
+	// The IU performs liftoff without calling SeparateStage. Publish that stage
+	// change so a replica enters the first-stage configuration before separation.
+	if (stage == PRELAUNCH_STAGE && s == LAUNCH_STAGE_ONE) {
+		VESSELSTATUS status;
+		GetStatus(status);
+		AnnounceStageEvent(StageEventKind::Liftoff, s, false, status);
+	}
+
 	stage = s;
 	StageState = 0;
 
@@ -3772,8 +3954,10 @@ void Saturn::GenericTimestep(double simt, double simdt, double mjd)
 		noisefreq = 15.0;
 	}
 
-	for (int i = 0; i < nth; i++)
-		thsum += GetThrusterLevel(tharr[i]);
+	for (int i = 0; i < nth; i++) {
+		if (tharr[i])
+			thsum += GetThrusterLevel(tharr[i]);
+	}
 	
 	if (stage >= LAUNCH_STAGE_ONE &&  stage <= STAGE_ORBIT_SIVB) {
 		if (SaturnType == SAT_SATURNV) {
@@ -5633,6 +5817,13 @@ void Saturn::VHFRangingReturnSignal() //DELETE ME WHEN YOU ADD THE CONNECTOR
 
 void Saturn::StartSeparationPyros()
 {
+	if (IsMultiplayerReplica() && !IsApplyingReplicatedStageEvent())
+		return;
+	if (LatestStageEvent().kind != StageEventKind::PayloadSeparation) {
+		VESSELSTATUS status;
+		GetStatus(status);
+		AnnounceStageEvent(StageEventKind::PayloadSeparation, stage, false, status);
+	}
 	payloadCommandConnector.StartSeparationPyros();
 }
 

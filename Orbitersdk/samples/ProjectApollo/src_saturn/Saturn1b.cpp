@@ -261,30 +261,26 @@ void Saturn1b::Timestep (double simt, double simdt, double mjd)
 
 	//S-IB/S-IVB separation
 
-	if (SIBSIVBSepPyros.Blown() && stage <= LAUNCH_STAGE_ONE)
+	if (!IsMultiplayerReplica() && SIBSIVBSepPyros.Blown() && stage <= LAUNCH_STAGE_ONE)
 	{
-		SeparateStage(LAUNCH_STAGE_SIVB);
-		SetStage(LAUNCH_STAGE_SIVB);
-		AddRCS_S4B();
+		ApplyStageTransition(StageEventKind::S1B, LAUNCH_STAGE_SIVB);
 	}
 
 	//
 	// CSM/LV separation
 	//
 
-	if (!Failures.GetFailure(CSMFailures_CSM_LV_Separation_Failure) && CSMLVPyros.Blown() && stage < CSM_LEM_STAGE) {
-		SeparateStage(CSM_LEM_STAGE);
-		SetStage(CSM_LEM_STAGE);
+	if (!IsMultiplayerReplica() && !Failures.GetFailure(CSMFailures_CSM_LV_Separation_Failure) && CSMLVPyros.Blown() && stage < CSM_LEM_STAGE) {
+		ApplyStageTransition((stage == LAUNCH_STAGE_SIVB || stage == STAGE_ORBIT_SIVB) ? StageEventKind::SIVB : StageEventKind::Abort, CSM_LEM_STAGE);
 	}
 
 	//
 	// CM/SM separation pyros
 	//
 
-	if (CMSMPyros.Blown() && stage < CM_STAGE)
+	if (!IsMultiplayerReplica() && CMSMPyros.Blown() && stage < CM_STAGE)
 	{
-		SeparateStage(CM_STAGE);
-		SetStage(CM_STAGE);
+		ApplyStageTransition(StageEventKind::ServiceModule, CM_STAGE);
 	}
 }
 

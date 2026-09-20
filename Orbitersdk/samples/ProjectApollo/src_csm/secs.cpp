@@ -1598,7 +1598,7 @@ void SECS::Timestep(double simt, double simdt)
 	}
 	/// \todo This assumes instantaneous separation of the LM, but it avoids connector calls each time step
 	if (pyroA || pyroB) {
-		Sat->StartSeparationPyros();
+		Sat->ApplyStageTransition(Saturn::StageEventKind::PayloadSeparation, Sat->GetStage());
 	}
 
 	//

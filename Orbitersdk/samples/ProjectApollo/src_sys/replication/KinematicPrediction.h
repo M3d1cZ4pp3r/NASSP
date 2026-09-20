@@ -158,14 +158,4 @@ inline State Extrapolate(const State &sample, double seconds)
 	return predicted;
 }
 
-// Moves a desired end-of-frame state back through Orbiter's expected integration.
-inline State BackstepForOrbiterIntegration(const State &target, const VECTOR3 &orbiterAcceleration, double seconds)
-{
-	seconds = (std::max)(0.0, seconds);
-	State initial = target;
-	initial.position = target.position - target.velocity * seconds + orbiterAcceleration * (0.5 * seconds * seconds);
-	initial.velocity = target.velocity - orbiterAcceleration * seconds;
-	initial.orientation = IntegrateOrientation(target.orientation, target.angularVelocity, -seconds);
-	return initial;
-}
 }

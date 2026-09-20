@@ -29,6 +29,7 @@ set(SOURCES
     ${NASSP_SOURCE_ROOT}/src_sys/connector.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/DelayTimer.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/inertial.cpp
+    ${NASSP_SOURCE_ROOT}/src_sys/NasspReplicationBridge.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/powersource.cpp
     ${NASSP_SOURCE_ROOT}/src_sys/pyro.cpp
 )

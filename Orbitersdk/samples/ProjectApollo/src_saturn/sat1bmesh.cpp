@@ -613,9 +613,12 @@ void Saturn1b::SetSecondStageEngines (double offset)
 	thg_ver = CreateThrusterGroup (th_ver, 3, (THGROUP_TYPE)(THGROUP_USER + 1));
 }
 
-void Saturn1b::SeparateStage (int new_stage)
+void Saturn1b::SeparateStage (int new_stage, StageEventKind kind)
 
 {
+	if (IsMultiplayerReplica() && !IsApplyingReplicatedStageEvent())
+		return;
+
 	VESSELSTATUS vs1;
 	VESSELSTATUS vs2;
 
@@ -673,21 +676,29 @@ void Saturn1b::SeparateStage (int new_stage)
 		vel1 = _V(1.0,1.0,1.0);
 	}
 
-	VECTOR3 rofs1, rvel1 = {vs1.rvel.x, vs1.rvel.y, vs1.rvel.z};
-	VECTOR3 rofs2, rvel2 = {vs2.rvel.x, vs2.rvel.y, vs2.rvel.z};
+	// Replicas use the authority's resolved spawn pose and must not apply local offsets again.
+	if(IsApplyingReplicatedStageEvent()) {
+		ApplyReplicatedStageSpawnState(vs1);
+	}
+	else {
+		VECTOR3 rofs1, rvel1 = {vs1.rvel.x, vs1.rvel.y, vs1.rvel.z};
+		VECTOR3 rofs2, rvel2 = {vs2.rvel.x, vs2.rvel.y, vs2.rvel.z};
 
-	Local2Rel (ofs1, vs1.rpos);
-	Local2Rel (ofs2, vs2.rpos);
+		Local2Rel (ofs1, vs1.rpos);
+		Local2Rel (ofs2, vs2.rpos);
 
-	GlobalRot (vel1, rofs1);
-	GlobalRot (vel2, rofs2);
+		GlobalRot (vel1, rofs1);
+		GlobalRot (vel2, rofs2);
 
-	vs1.rvel.x = rvel1.x+rofs1.x;
-	vs1.rvel.y = rvel1.y+rofs1.y;
-	vs1.rvel.z = rvel1.z+rofs1.z;
-	vs2.rvel.x = rvel2.x+rofs2.x;
-	vs2.rvel.y = rvel2.y+rofs2.y;
-	vs2.rvel.z = rvel2.z+rofs2.z;
+		vs1.rvel.x = rvel1.x+rofs1.x;
+		vs1.rvel.y = rvel1.y+rofs1.y;
+		vs1.rvel.z = rvel1.z+rofs1.z;
+		vs2.rvel.x = rvel2.x+rofs2.x;
+		vs2.rvel.y = rvel2.y+rofs2.y;
+		vs2.rvel.z = rvel2.z+rofs2.z;
+	}
+
+	AnnounceStageEvent(kind, new_stage, kind == StageEventKind::SIVB, vs1);
 
 	if (stage == CM_STAGE)
 	{

@@ -30,6 +30,7 @@
 #include "replication/ReplicationHub.h"
 
 #include <chrono>
+#include <stdio.h>
 
 ///
 /// \ingroup Connectors
@@ -328,11 +329,10 @@ public:
 	///
 	/// This function interpolates position and orientation between host updates based on their derivatives.
 	/// Additionally it extrapolates an update based on the assumed message delay.
-	/// \brief If vessel is a replica, this applies its predicted kinematic state before Orbiter physics
+	/// \brief If vessel is a replica, this prepares its predicted state for the end of the Orbiter physics step
 	/// \param simdt Orbiter integration interval following this call
 	///
 	void UpdateReplicatedKinematics(double simdt);
-
 
 	/// Provider block
 	const char *ComponentKey() const override;
@@ -352,7 +352,41 @@ public:
 	///
 	void UndockConnectors(int port);
 
+public:
+	enum class StageEventKind : std::uint8_t
+	{
+		None,
+		S1C,
+		S1B,
+		Interstage,
+		S2,
+		SIVB,
+		ServiceModule,
+		CommandModule,
+		Abort,
+		PayloadSeparation,
+		Liftoff
+	};
+
 protected:
+	struct StageTransition
+	{
+		StageEventKind kind = StageEventKind::None;
+		std::uint8_t targetStage = 0;
+		bool spawnsEntity = false;
+		VECTOR3 position = {};
+		VECTOR3 velocity = {};
+		nasspmp_kinematics::Quaternion orientation;
+	};
+	// Publishes one authority staging result for a change-replicated vessel group.
+	void AnnounceStageEvent(StageEventKind kind, int targetStage, bool spawnsEntity, const VESSELSTATUS &spawnState);
+	// Makes the received spawn pose available only while the matching staging call executes.
+	void BeginReplicatedStageEvent(const StageTransition &event);
+	void EndReplicatedStageEvent();
+	void ApplyReplicatedStageSpawnState(VESSELSTATUS &spawnState) const;
+	bool IsApplyingReplicatedStageEvent() const { return applyingReplicatedStageEvent; }
+	const StageTransition &LatestStageEvent() const { return stageEvent; }
+	Revision StageEventRevision() const { return stageEventRevision; }
 
 	///
 	/// \brief Register a connector for use by other vessels.
@@ -400,6 +434,13 @@ protected:
 	nasspmp_kinematics::State CurrentKinematicState(const VESSELSTATUS2 &status) const;
 	void ApplyFreeFlightState(const nasspmp_kinematics::State &state);
 	void ApplyLandedState(const ReplicatedKinematics &state);
+	void OpenKinematicsLog(ReplicationRole role);
+	void LogKinematics(const char *event, SimulationTick serverTick, std::uint8_t flightStatus,
+		double messageAgeSeconds, double elapsedSeconds, double authorityTimeScale,
+		double predictionSeconds, double correctionFraction, int smoothCorrection,
+		const nasspmp_kinematics::State *sample, const nasspmp_kinematics::State *current,
+		const nasspmp_kinematics::State *target, const nasspmp_kinematics::State *applied,
+		const VECTOR3 *positionError, const VECTOR3 *velocityError, const VECTOR3 *orbiterAcceleration);
 
 	ReplicatedKinematics replicatedKinematics;
 
@@ -414,6 +455,7 @@ protected:
 
 	// Targets for correction
 	VECTOR3 positionCorrection = {};
+	VECTOR3 velocityCorrection = {};
 	nasspmp_kinematics::Quaternion orientationCorrection;
 
 	// Starting point of correction
@@ -426,10 +468,22 @@ protected:
 	VECTOR3 authorityVelocitySample = {};
 	VECTOR3 authorityAccelerationSample = {};
 
-	// Measures the acceleration applied by Orbiter between two replica PreStep calls.
+	// Measures the acceleration applied by Orbiter between consecutive replica PreSteps.
 	bool hasReplicaIntegrationSample = false;
 	VECTOR3 replicaIntegrationStartVelocity = {};
 	double replicaIntegrationStepSeconds = 0.0;
+	bool hasReplicaOrbiterAcceleration = false;
+	VECTOR3 replicaOrbiterAcceleration = {};
+	bool kinematicsUpdateLogPending = false;
+	FILE *kinematicsLogFile = NULL;
+	unsigned int kinematicsLogSequence = 0;
+	std::chrono::steady_clock::time_point kinematicsLogStarted;
+	std::chrono::steady_clock::time_point kinematicsLogLastFlush;
+
+	// Staging related replication values
+	StageTransition stageEvent;
+	Revision stageEventRevision = 0;
+	bool applyingReplicatedStageEvent = false;
 
 	// Owns the registration and role boundary for this replicated vessel entity.
 	ReplicationHub ReplicationHubInstance;

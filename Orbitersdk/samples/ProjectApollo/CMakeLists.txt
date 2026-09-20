@@ -124,6 +124,7 @@ add_subdirectory(Project/VAB)
 set(NASSP_REPLICATION_MODULES
     ASTP
     LEM
+    ML
     ProjectApolloMFD
     SIVB
     Saturn1B

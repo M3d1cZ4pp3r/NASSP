@@ -372,6 +372,10 @@ void ML::clbkPreStep(double simt, double simdt, double mjd) {
 	ATTACHMENTHANDLE ah;
 
 	if (!firstTimestepDone) DoFirstTimestep();
+
+	// A replica only advances animation movements already requested by its scenario state.
+	// Launch sequencing, ground systems and all physical interaction remain authoritative.
+	if (sat && sat->IsMultiplayerReplica()) return;
 	
 	switch (state) {
 	case STATE_VABBUILD:

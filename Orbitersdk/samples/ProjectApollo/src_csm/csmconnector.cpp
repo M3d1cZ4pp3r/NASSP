@@ -321,7 +321,7 @@ bool SaturnToIUCommandConnector::ReceiveMessage(Connector *from, ConnectorMessag
 	case IULV_SEPARATE_STAGE:
 		if (OurVessel)
 		{
-			OurVessel->SeparateStage(m.val1.iValue);
+			//OurVessel->SeparateStage(m.val1.iValue);
 			return true;
 		}
 		break;

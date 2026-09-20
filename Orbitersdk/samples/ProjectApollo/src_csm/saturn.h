@@ -947,6 +947,7 @@ public:
 
 	const char *ComponentKey() const override;
 	ProviderResult Describe(ReplicationCatalogBuilder &catalog) const override;
+	bool TryGetRevision(const char *groupKey, Revision &revision) const override;
 	ProviderResult Capture(const char *groupKey, ReplicationWriter &writer, const CaptureContext &context) override;
 	ProviderResult Validate(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) const override;
 	void Apply(const char *groupKey, const ReplicationReader &reader, const ApplyContext &context) override;
@@ -1149,7 +1150,12 @@ public:
 	void SetContrailLevel(double level);
 
 	void SetStage(int s);
-	virtual void SeparateStage(int stage) = 0;
+
+	/// Executes the complete staging effect sequence for both authority and replica.
+	/// \brief Execute stage transition
+	void ApplyStageTransition(StageEventKind kind, int targetStage);
+
+	virtual void SeparateStage(int stage, StageEventKind kind) = 0;
 
 	///
 	/// Turn on the LV Guidance warning light on the control panel to indicate an autopilot
@@ -4610,6 +4616,7 @@ protected:
 
 	void CapturePresentation(PresentationPayload &target);
 	ProviderResult ReadPresentation(const ReplicationReader &reader, PresentationPayload *target) const;
+	ProviderResult ReadStageTransition(const ReplicationReader &reader, StageTransition *target) const;
 	void ApplyExternalVisualPresentation(const ReplicatedPresentation &presentation, ThrusterPresentationMode mode);
 	void ApplyAmbientSoundState(std::uint8_t state);
 	ProviderResult ReadChecklistEvents(const ReplicationReader &reader, SaturnEvents *target) const;
