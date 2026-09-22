@@ -43,20 +43,178 @@
 namespace
 {
 const char *KinematicsGroupKey = "state";
+
 const double KinematicCorrectionDurationSeconds = 0.25;
+
+// Offset below which the filter is treated as settled and switched off.
+const double KinematicSettledOffsetMeters = 0.001;
+
 const double KinematicMinimumSmoothPositionMeters = 0.5;
 const double KinematicMinimumSmoothAngleRadians = 0.5 * RAD;
 const double KinematicTimingErrorSeconds = 0.05;
-const double MaximumPredictionRealAgeSeconds = 0.5;
+
+// Longest span a sample may be extrapolated over, in simulation time. Long enough that a clock
+// offset of a few seconds still extrapolates smoothly instead of freezing the replica between samples. 
+const double MaximumPredictionSeconds = 5.0;
+
+// Shortest interval the authority acceleration may be differenced over, and the largest
+// magnitude the result may have. There were rare occasions where this spiked insanely high, so prevent it.
+const double MinimumAccelerationIntervalSeconds = 0.005;
+const double MaximumAccelerationMetersPerSecondSquared = 200.0;
+
+// Frames a sample can be expressed in. Both are centred on the gravity reference and differ
+// only in whether the frame turns with the body.
+const std::uint8_t InertialFrame = 0;
+const std::uint8_t BodyFixedFrame = 1;
+
+// Altitude below which the body-fixed frame is used. Close to the surface the rotation of the
+// body dominates the inertial motion, and the turning frame removes it from the prediction
+// entirely.
+//
+// Held at zero for now, which selects the inertial frame everywhere.
+const double BodyFixedFrameAltitudeMeters = 0.0;
+
 const std::uint8_t FreeFlightStatus = 0;
 const std::uint8_t LandedStatus = 1;
 const std::uint8_t DockedStatus = 2;
+
 const DWORD LandedFlightStatusFlag = 1;
 const DWORD DockedFlightStatusFlag = 2;
+
+// TODO: Move a lot of all this to kinematics library?
+// It starts polluting this file
 
 bool IsFinite(const VECTOR3 &value)
 {
 	return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+// Identity of a celestial body that both machines derive alike. The name is hashed rather
+// than an index transmitted, because the order in which bodies are loaded might not be guaranteed
+// to match between installations.
+std::uint64_t BodyIdentity(OBJHANDLE body)
+{
+	char name[256] = {};
+	oapiGetObjectName(body, name, sizeof(name));
+
+	ReplicationSchemaBuilder identity;
+	identity.AddString(name);
+	return identity.SchemaId();
+}
+
+// Finds the local celestial body carrying an identity, or NULL when this installation has no
+// such body.
+OBJHANDLE ResolveBody(std::uint64_t identity)
+{
+	const DWORD count = oapiGetGbodyCount();
+	for (DWORD index = 0; index < count; ++index) {
+		const OBJHANDLE body = oapiGetGbodyByIndex(static_cast<int>(index));
+		if (body && BodyIdentity(body) == identity)
+			return body;
+	}
+	return NULL;
+}
+
+// Angular velocity of a celestial body in the global frame.
+VECTOR3 BodyAngularVelocity(OBJHANDLE body, const MATRIX3 &rotation)
+{
+	const double period = oapiGetPlanetPeriod(body);
+	if (period == 0.0)
+		return _V(0.0, 0.0, 0.0);
+
+	// Orbiter turns every celestial body about its own local y axis.
+	return mul(rotation, _V(0.0, PI2 / period, 0.0));
+}
+
+// Orientation a body will have after the given span. Needed because a sample is expressed at
+// the render date, which is one integration step ahead of the state Orbiter currently holds.
+MATRIX3 AdvancedRotationMatrix(OBJHANDLE body, double seconds)
+{
+	MATRIX3 rotation;
+	oapiGetRotationMatrix(body, &rotation);
+	const double period = oapiGetPlanetPeriod(body);
+	if (period == 0.0 || seconds == 0.0)
+		return rotation;
+
+	// The body turns about its own y axis, so the advance composes from the right.
+	const double angle = PI2 * seconds / period;
+	const double cosine = cos(angle);
+	const double sine = sin(angle);
+	const MATRIX3 advance = _M(cosine, 0.0, sine, 0.0, 1.0, 0.0, -sine, 0.0, cosine);
+	return mul(rotation, advance);
+}
+
+// Expresses an inertial body-relative state in the frame that turns with the body. A vessel
+// standing on the surface has exactly zero velocity and zero acceleration there, which is what
+// takes the rotation of the body out of the prediction.
+void ToBodyFixed(OBJHANDLE body, VECTOR3 &position, VECTOR3 &velocity)
+{
+	MATRIX3 rotation;
+	oapiGetRotationMatrix(body, &rotation);
+
+	const VECTOR3 turning = velocity - crossp(BodyAngularVelocity(body, rotation), position);
+	position = tmul(rotation, position);
+	velocity = tmul(rotation, turning);
+}
+
+// Reverses ToBodyFixed at the orientation the body has after the given span.
+void FromBodyFixed(OBJHANDLE body, double advanceSeconds, VECTOR3 &position, VECTOR3 &velocity)
+{
+	const MATRIX3 rotation = AdvancedRotationMatrix(body, advanceSeconds);
+	const VECTOR3 angular = BodyAngularVelocity(body, rotation);
+
+	position = mul(rotation, position);
+	velocity = mul(rotation, velocity) + crossp(angular, position);
+}
+
+// Returns a predicted sample to the inertial frame the vessel state uses, at the body
+// orientation belonging to the given span ahead of the current date. A sample that was never
+// body-fixed passes through untouched.
+void ToInertialFrame(OBJHANDLE body, std::uint8_t frame, double advanceSeconds,
+	nasspmp_kinematics::State &state)
+{
+	if (frame != BodyFixedFrame || !body)
+		return;
+	FromBodyFixed(body, advanceSeconds, state.position, state.velocity);
+}
+
+// Natural frequency of the visual offset filter, chosen so a critically damped response has
+// decayed to about two percent after one correction duration.
+double OffsetFilterFrequency()
+{
+	return 6.0 / KinematicCorrectionDurationSeconds;
+}
+
+// Remaining share of an exponentially decaying quantity after one step.
+double OffsetDecayFactor(double stepSeconds)
+{
+	return exp(-OffsetFilterFrequency() * stepSeconds);
+}
+
+// Decays an offset and its rate towards zero, this is done analytically.
+// This smoothes the position offset together with the speed offset
+void DecayVisualOffset(VECTOR3 &offset, VECTOR3 &offsetRate, double stepSeconds)
+{
+	if (stepSeconds <= 0.0)
+		return;
+
+	const double frequency = OffsetFilterFrequency();
+	const double decay = OffsetDecayFactor(stepSeconds);
+	const VECTOR3 slope = offsetRate + offset * frequency;
+	const VECTOR3 decayed = (offset + slope * stepSeconds) * decay;
+
+	offsetRate = (offsetRate - slope * (frequency * stepSeconds)) * decay;
+	offset = decayed;
+}
+
+// Bounds the span an authority sample may be extrapolated over, in either direction. A negative
+// span means the local clock runs ahead of the authority, so the sample is carried back to the
+// local date rather than shown at its own.
+double ClampPredictionSeconds(double seconds)
+{
+	if (!std::isfinite(seconds))
+		return 0.0;
+	return (std::max)(-MaximumPredictionSeconds, (std::min)(MaximumPredictionSeconds, seconds));
 }
 
 bool IsFinite(const nasspmp_kinematics::Quaternion &value)
@@ -354,6 +512,7 @@ ProjectApolloConnectorVessel::~ProjectApolloConnectorVessel()
 
 void ProjectApolloConnectorVessel::OpenKinematicsLog(ReplicationRole role)
 {
+#ifdef LOG_KINEMATICS
 	if (kinematicsLogFile) {
 		fclose(kinematicsLogFile);
 		kinematicsLogFile = NULL;
@@ -384,7 +543,7 @@ void ProjectApolloConnectorVessel::OpenKinematicsLog(ReplicationRole role)
 		return;
 
 	setvbuf(kinematicsLogFile, NULL, _IOFBF, 64 * 1024);
-	fprintf(kinematicsLogFile, "event,wall_seconds,server_tick,flight_status,message_age_seconds,elapsed_seconds,authority_time_scale,prediction_seconds,correction_fraction,smooth_correction");
+	fprintf(kinematicsLogFile, "event,wall_seconds,sample_session_time,flight_status,render_session_time,step_seconds,prediction_seconds,correction_fraction,smooth_correction");
 	WriteKinematicsStateHeader(kinematicsLogFile, "sample");
 	WriteKinematicsStateHeader(kinematicsLogFile, "current");
 	WriteKinematicsStateHeader(kinematicsLogFile, "target");
@@ -396,23 +555,25 @@ void ProjectApolloConnectorVessel::OpenKinematicsLog(ReplicationRole role)
 	fflush(kinematicsLogFile);
 	kinematicsLogStarted = std::chrono::steady_clock::now();
 	kinematicsLogLastFlush = kinematicsLogStarted;
+#endif
 }
 
-void ProjectApolloConnectorVessel::LogKinematics(const char *event, SimulationTick serverTick,
-	std::uint8_t flightStatus, double messageAgeSeconds, double elapsedSeconds, double authorityTimeScale,
+void ProjectApolloConnectorVessel::LogKinematics(const char *event, double sampleSessionTime,
+	std::uint8_t flightStatus, double renderSessionTime, double stepSeconds,
 	double predictionSeconds, double correctionFraction, int smoothCorrection,
 	const nasspmp_kinematics::State *sample, const nasspmp_kinematics::State *current,
 	const nasspmp_kinematics::State *target, const nasspmp_kinematics::State *applied,
 	const VECTOR3 *positionError, const VECTOR3 *velocityError, const VECTOR3 *orbiterAcceleration)
 {
+#ifdef LOG_KINEMATICS
 	if (!kinematicsLogFile)
 		return;
 
 	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 	const double wallSeconds = std::chrono::duration<double>(now - kinematicsLogStarted).count();
-	fprintf(kinematicsLogFile, "%s,%.9f,%llu,%u,%.9f,%.9f,%.9f,%.9f,%.9f,%d", event, wallSeconds,
-		static_cast<unsigned long long>(serverTick), static_cast<unsigned int>(flightStatus), messageAgeSeconds,
-		elapsedSeconds, authorityTimeScale, predictionSeconds, correctionFraction, smoothCorrection);
+	fprintf(kinematicsLogFile, "%s,%.9f,%.9f,%u,%.9f,%.9f,%.9f,%.9f,%d", event, wallSeconds,
+		sampleSessionTime, static_cast<unsigned int>(flightStatus), renderSessionTime, stepSeconds,
+		predictionSeconds, correctionFraction, smoothCorrection);
 	WriteKinematicsState(kinematicsLogFile, sample);
 	WriteKinematicsState(kinematicsLogFile, current);
 	WriteKinematicsState(kinematicsLogFile, target);
@@ -426,6 +587,7 @@ void ProjectApolloConnectorVessel::LogKinematics(const char *event, SimulationTi
 		fflush(kinematicsLogFile);
 		kinematicsLogLastFlush = now;
 	}
+#endif
 }
 
 const char *ProjectApolloConnectorVessel::ComponentKey() const
@@ -435,11 +597,12 @@ const char *ProjectApolloConnectorVessel::ComponentKey() const
 
 ProviderResult ProjectApolloConnectorVessel::Describe(ReplicationCatalogBuilder &catalog) const
 {
-	// Keep the complete motion sample in one unreliable group. A newer sample can
-	// replace an older one without mixing position and orientation from different ticks.
+	// Keep the complete motion sample in one unreliable group.
 	ReplicationSchemaBuilder schema;
-	schema.AddString("project-apollo-kinematics-v2");
+	schema.AddString("project-apollo-kinematics-v4");
 	schema.AddString("flight_status:uint2");
+	schema.AddString("reference_frame:uint1");
+	schema.AddString("reference_body:uint64");
 	schema.AddString("reference_position:float64x3");
 	schema.AddString("reference_velocity:float64x3");
 	schema.AddString("reference_acceleration:float64x3");
@@ -455,7 +618,7 @@ ProviderResult ProjectApolloConnectorVessel::Describe(ReplicationCatalogBuilder 
 	state.delivery = ReplicationDelivery::Unreliable;
 	state.periodicIntervalMs = 50;
 	state.replicateChanges = false;
-	state.maximumPayloadBytes = static_cast<std::uint32_t>(1 + 23 * sizeof(double));
+	state.maximumPayloadBytes = static_cast<std::uint32_t>(1 + 8 + 23 * sizeof(double));
 	catalog.AddGroup(state);
 	return ProviderResult::Success;
 }
@@ -477,28 +640,61 @@ ProviderResult ProjectApolloConnectorVessel::Capture(const char *groupKey, Repli
 	GetStatusEx(&status);
 	nasspmp_kinematics::State state = CurrentKinematicState(status);
 
+	// Near the surface the sample is expressed in the frame that turns with the reference body,
+	// which removes the rotation of the body from the prediction. The receiver reconstructs that
+	// rotation from its own clock.
+	const std::uint8_t frame = status.rbody && GetAltitude() < BodyFixedFrameAltitudeMeters ?
+		BodyFixedFrame : InertialFrame;
+	if (frame == BodyFixedFrame)
+		ToBodyFixed(status.rbody, state.position, state.velocity);
+
+	// Position and velocity only mean something relative to their body, so the receiver is told
+	// which one instead of resolving its own and hoping both sides agree.
+	const std::uint64_t referenceBody = status.rbody ? BodyIdentity(status.rbody) : 0;
+
+	// A difference taken across a change of frame or body compares two unrelated quantities.
+	// Across a change of sphere of influence the velocity jumps by the orbital speed of the body.
+	const bool referenceChanged = frame != authorityVelocitySampleFrame ||
+		referenceBody != authorityVelocitySampleBody;
+	if (hasAuthorityVelocitySample && referenceChanged)
+		hasAuthorityVelocitySample = false;
+
 	// Calculate acceleration by difference to improve client-side prediction
 	// The finite difference follows Orbiter's actually propagated velocity. This
-	// includes gravity, thrust and other forces without duplicating its gravity model.
-	if (hasAuthorityVelocitySample && context.simulationTick > authorityVelocitySampleTick) {
-		const double elapsedSeconds = static_cast<double>(context.simulationTick - authorityVelocitySampleTick) / 1000.0;
-		authorityAccelerationSample = (state.velocity - authorityVelocitySample) / elapsedSeconds;
-	} else if (!hasAuthorityVelocitySample || context.simulationTick < authorityVelocitySampleTick) {
+	// includes gravity, thrust and other forces.
+	if (hasAuthorityVelocitySample && context.hasSessionTime &&
+		context.captureSessionTime > authorityVelocitySampleTime + MinimumAccelerationIntervalSeconds) {
+		const double elapsedSeconds = context.captureSessionTime - authorityVelocitySampleTime;
+		const VECTOR3 difference = (state.velocity - authorityVelocitySample) / elapsedSeconds;
+
+		// A capture stamp that does not match its own state turns the difference into a value
+		// no vehicle can produce. Keeping the previous sample rides out that single frame.
+		if (length(difference) <= MaximumAccelerationMetersPerSecondSquared)
+			authorityAccelerationSample = difference;
+	} else if (!hasAuthorityVelocitySample || !context.hasSessionTime ||
+		context.captureSessionTime < authorityVelocitySampleTime) {
 		authorityAccelerationSample = {};
 	}
-	if (!hasAuthorityVelocitySample || context.simulationTick != authorityVelocitySampleTick) {
+	if (context.hasSessionTime &&
+		(!hasAuthorityVelocitySample || context.captureSessionTime != authorityVelocitySampleTime)) {
 		authorityVelocitySample = state.velocity;
-		authorityVelocitySampleTick = context.simulationTick;
+		authorityVelocitySampleTime = context.captureSessionTime;
+		authorityVelocitySampleFrame = frame;
+		authorityVelocitySampleBody = referenceBody;
 		hasAuthorityVelocitySample = true;
 	}
+
 	state.acceleration = authorityAccelerationSample;
+
 	const double notAvailable = std::nan("");
-	LogKinematics("capture", context.simulationTick, flightStatus, notAvailable, notAvailable, oapiGetTimeAcceleration(),
+	LogKinematics("capture", context.captureSessionTime, flightStatus, notAvailable, oapiGetSimStep(),
 		notAvailable, notAvailable, -1, &state, NULL, NULL, NULL, NULL, NULL, NULL);
 
 	// The free-flight fields are always present. Landed placement follows only
 	// for landed samples, keeping the common high-rate payload compact.
 	writer.WriteScalar(flightStatus, 2)
+		.WriteScalar(frame, 1)
+		.WriteScalar(referenceBody)
 		.WriteScalar(state.position.x).WriteScalar(state.position.y).WriteScalar(state.position.z)
 		.WriteScalar(state.velocity.x).WriteScalar(state.velocity.y).WriteScalar(state.velocity.z)
 		.WriteScalar(state.acceleration.x).WriteScalar(state.acceleration.y).WriteScalar(state.acceleration.z)
@@ -515,10 +711,12 @@ ProviderResult ProjectApolloConnectorVessel::Capture(const char *groupKey, Repli
 
 ProviderResult ProjectApolloConnectorVessel::ReadKinematics(const ReplicationReader &reader, ReplicatedKinematics *target, const ApplyContext &context) const
 {
-	// Decode into a temporary object so malformed payloads cannot partially
-	// change the last valid presentation state.
+	// Decode into a temporary object
 	ReplicatedKinematics decoded;
+	std::uint64_t referenceBody = 0;
 	reader.ReadScalar(decoded.flightStatus, 2)
+		.ReadScalar(decoded.frame, 1)
+		.ReadScalar(referenceBody)
 		.ReadScalar(decoded.state.position.x).ReadScalar(decoded.state.position.y).ReadScalar(decoded.state.position.z)
 		.ReadScalar(decoded.state.velocity.x).ReadScalar(decoded.state.velocity.y).ReadScalar(decoded.state.velocity.z)
 		.ReadScalar(decoded.state.acceleration.x).ReadScalar(decoded.state.acceleration.y)
@@ -537,6 +735,8 @@ ProviderResult ProjectApolloConnectorVessel::ReadKinematics(const ReplicationRea
 	const bool payloadComplete = reader.Finish();
 	if (!payloadComplete)
 		return ProviderResult::Malformed;
+	
+	// Range checks
 	if (decoded.flightStatus > DockedStatus || !IsFinite(decoded.state.position) || !IsFinite(decoded.state.velocity) ||
 		!IsFinite(decoded.state.acceleration) || !IsFinite(decoded.state.orientation) ||
 		!IsFinite(decoded.state.angularVelocity))
@@ -551,8 +751,16 @@ ProviderResult ProjectApolloConnectorVessel::ReadKinematics(const ReplicationRea
 		!std::isfinite(decoded.surfaceHeading) || !std::isfinite(decoded.landedAltitude)))
 		return ProviderResult::Rejected;
 
+	// A body this installation does not know makes every coordinate in the sample meaningless,
+	// which is worse than dropping it.
+	decoded.referenceBody = ResolveBody(referenceBody);
+	if (!decoded.referenceBody)
+		return ProviderResult::Rejected;
+
 	decoded.state.orientation = nasspmp_kinematics::Normalize(decoded.state.orientation);
-	decoded.serverTick = context.serverTick;
+	decoded.sampleSessionTime = context.sampleSessionTime;
+	decoded.hasSessionTime = context.hasSessionTime;
+
 	if (target)
 		*target = decoded;
 	return ProviderResult::Success;
@@ -571,34 +779,27 @@ void ProjectApolloConnectorVessel::Apply(const char *, const ReplicationReader &
 	if (ReadKinematics(reader, &incoming, context) != ProviderResult::Success)
 		return;
 
-	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-	incoming.receivedAt = now;
-	incoming.messageAgeSeconds = static_cast<double>(context.estimatedMessageAgeMs) / 1000.0;
-
-	// Server ticks measure simulation time, while arrivals use a monotonic real clock.
-	// Their ratio estimates the host time acceleration without synchronized clocks.
-	if (hasReplicatedKinematics && context.purpose != ApplyPurpose::Baseline && incoming.serverTick > replicatedKinematics.serverTick) {
-		incoming.authorityTimeScale = replicatedKinematics.authorityTimeScale;
-		const double elapsedSeconds = std::chrono::duration<double>(now - replicatedKinematics.receivedAt).count();
-		const double serverSeconds = static_cast<double>(incoming.serverTick - replicatedKinematics.serverTick) / 1000.0;
-		if (elapsedSeconds > 0.001) {
-			const double measuredTimeScale = serverSeconds / elapsedSeconds;
-			if (std::isfinite(measuredTimeScale) && measuredTimeScale >= 0.0 && measuredTimeScale <= 1000.0)
-				incoming.authorityTimeScale = replicatedKinematics.authorityTimeScale * 0.75 + measuredTimeScale * 0.25;
-		}
-	}
+	double liveStateSessionTime = 0.0;
+	const bool hasLiveStateTime = TryGetSessionTime(oapiGetSimMJD(), liveStateSessionTime);
 
 	correctionActive = false;
 	bool receivedStateCompared = false;
 	if (!hasReplicatedKinematics || replicatedKinematics.flightStatus != LandedStatus || context.purpose == ApplyPurpose::Baseline)
 		landedStateApplied = false;
 
-	if (hasReplicatedKinematics && context.purpose != ApplyPurpose::Baseline && incoming.flightStatus != LandedStatus) {
-		// Execute prediction, since received vessel state is already as old as the round-trip-time of the message
-		const double predictionAgeSeconds = (std::min)(MaximumPredictionRealAgeSeconds, incoming.messageAgeSeconds);
-		const double predictionSeconds = predictionAgeSeconds * incoming.authorityTimeScale;
-		const nasspmp_kinematics::State target = nasspmp_kinematics::Extrapolate(incoming.state, predictionSeconds);
-		const nasspmp_kinematics::State current = CurrentKinematicState();
+	if (hasReplicatedKinematics && hasLiveStateTime && incoming.hasSessionTime &&
+		context.purpose != ApplyPurpose::Baseline && incoming.flightStatus != LandedStatus) {
+
+		const double predictionSeconds = ClampPredictionSeconds(liveStateSessionTime - incoming.sampleSessionTime);
+
+		// Extrapolate from the sampled MJD on the authority to our MJD now. This preserves correlation between
+		// Bodies and vessels, and is generally a useful absolute reference
+		nasspmp_kinematics::State target = nasspmp_kinematics::Extrapolate(incoming.state, predictionSeconds);
+
+		// The comparison is against the live state, so the body orientation of this instant applies.
+		ToInertialFrame(incoming.referenceBody, incoming.frame, 0.0, target);
+
+		const nasspmp_kinematics::State current = CurrentKinematicState(incoming.referenceBody);
 
 		// Since position, velocity and orientation might still be deviated when receiving an update, 
 		// we perform correction smoothly if the difference is small enough.
@@ -607,31 +808,45 @@ void ProjectApolloConnectorVessel::Apply(const char *, const ReplicationReader &
 		velocityCorrection = current.velocity - target.velocity;
 		const double positionError = length(positionCorrection);
 		const double angleError = nasspmp_kinematics::AngularDistance(current.orientation, target.orientation);
-		const double timingWindow = KinematicTimingErrorSeconds * incoming.authorityTimeScale;
+
+		// A fixed distance threshold would mistake millisecond timing errors at orbital
+		// velocity for a teleport. Scale the soft-correction window with current motion.
+		const double timingWindow = KinematicTimingErrorSeconds * oapiGetTimeAcceleration();
 		const double smoothPositionLimit = (std::max)(KinematicMinimumSmoothPositionMeters,
 			length(target.velocity) * timingWindow);
 		const double smoothAngleLimit = (std::max)(KinematicMinimumSmoothAngleRadians,
 			length(target.angularVelocity) * timingWindow);
 
-		// A fixed distance threshold would mistake millisecond timing errors at orbital
-		// velocity for a teleport. Scale the soft-correction window with current motion.
 		const bool smoothCorrection = positionError <= smoothPositionLimit && angleError <= smoothAngleLimit;
+
+		// Inside the window the difference is assumed to be a timing artefact, so it is absorbed into the
+		// visual offset and decayed away. 
 		if (smoothCorrection) {
 			orientationCorrection = nasspmp_kinematics::Multiply(
 				nasspmp_kinematics::Inverse(target.orientation), current.orientation);
-			correctionStart = now;
 			correctionActive = true;
 		}
-		LogKinematics("receive", incoming.serverTick, incoming.flightStatus, incoming.messageAgeSeconds, 0.0,
-			incoming.authorityTimeScale, predictionSeconds, 0.0, smoothCorrection ? 1 : 0,
+
+		// Logged before the offset is discarded below, because a rejected difference is the
+		// one worth inspecting afterwards.
+		LogKinematics("receive", incoming.sampleSessionTime, incoming.flightStatus, liveStateSessionTime,
+			oapiGetSimStep(), predictionSeconds, 0.0, smoothCorrection ? 1 : 0,
 			&incoming.state, &current, &target, NULL, &positionCorrection, &velocityCorrection, NULL);
+
+		// Outside the window we just snap
+		if (!smoothCorrection) {
+			positionCorrection = _V(0.0, 0.0, 0.0);
+			velocityCorrection = _V(0.0, 0.0, 0.0);
+			orientationCorrection = nasspmp_kinematics::Quaternion();
+		}
 		receivedStateCompared = true;
 	}
 	if (!receivedStateCompared) {
 		const double notAvailable = std::nan("");
-		LogKinematics(context.purpose == ApplyPurpose::Baseline ? "baseline" : "receive", incoming.serverTick,
-			incoming.flightStatus, incoming.messageAgeSeconds, 0.0, incoming.authorityTimeScale,
-			notAvailable, notAvailable, -1, &incoming.state, NULL, NULL, NULL, NULL, NULL, NULL);
+		LogKinematics(context.purpose == ApplyPurpose::Baseline ? "baseline" : "receive", incoming.sampleSessionTime,
+			incoming.flightStatus, hasLiveStateTime ? liveStateSessionTime : notAvailable,
+			oapiGetSimStep(), notAvailable, notAvailable, -1,
+			&incoming.state, NULL, NULL, NULL, NULL, NULL, NULL);
 	}
 
 	replicatedKinematics = incoming;
@@ -691,19 +906,35 @@ void ProjectApolloConnectorVessel::ApplyReplicatedStageSpawnState(VESSELSTATUS &
 	spawnState.arot.z = std::atan2(rotation.m12, rotation.m11);
 }
 
-nasspmp_kinematics::State ProjectApolloConnectorVessel::CurrentKinematicState() const
+bool ProjectApolloConnectorVessel::TryGetSessionTime(double mjd, double &sessionTime) const
+{
+	const ReplicationTimeBase &timeBase = ReplicationHubInstance.GetTimeBase();
+	if (!timeBase.valid)
+		return false;
+
+	sessionTime = timeBase.SessionTime(mjd);
+	return true;
+}
+
+nasspmp_kinematics::State ProjectApolloConnectorVessel::CurrentKinematicState(OBJHANDLE reference) const
 {
 	VESSELSTATUS2 status = {};
 	status.version = 2;
 	status.flag = 0;
 	GetStatusEx(&status);
-	return CurrentKinematicState(status);
+	nasspmp_kinematics::State state = CurrentKinematicState(status);
+
+	// Measured against the body a received sample names, where Orbiter would otherwise report
+	// against whichever body it currently considers the gravity reference.
+	if (reference && reference != status.rbody) {
+		GetRelativePos(reference, state.position);
+		GetRelativeVel(reference, state.velocity);
+	}
+	return state;
 }
 
 nasspmp_kinematics::State ProjectApolloConnectorVessel::CurrentKinematicState(const VESSELSTATUS2 &status) const
 {
-	// Orbiter reports translation relative to the current gravity reference and
-	// attitude in its global frame; the wire sample deliberately uses the same split.
 	nasspmp_kinematics::State state;
 	state.position = status.rpos;
 	state.velocity = status.rvel;
@@ -716,14 +947,13 @@ nasspmp_kinematics::State ProjectApolloConnectorVessel::CurrentKinematicState(co
 	return state;
 }
 
-void ProjectApolloConnectorVessel::ApplyFreeFlightState(const nasspmp_kinematics::State &state)
+void ProjectApolloConnectorVessel::ApplyFreeFlightState(const nasspmp_kinematics::State &state, OBJHANDLE reference)
 {
-	const OBJHANDLE reference = GetGravityRef();
 	if (!reference)
 		return;
 
 	// Preserve all non-kinematic VESSELSTATUS2 fields while replacing the motion
-	// relative to the locally resolved gravity reference.
+	// relative to the body the authority measured it against.
 	VESSELSTATUS2 status = {};
 	status.version = 2;
 	status.flag = 0;
@@ -738,7 +968,7 @@ void ProjectApolloConnectorVessel::ApplyFreeFlightState(const nasspmp_kinematics
 	DefSetStateEx(&status);
 
 	// DefSetStateEx accepts orientation only as Euler angles in status.arot.
-	// Apply the predicted quaternion as an exact matrix after resetting translation.
+	// Apply the predicted quaternion as a matrix.
 	SetRotationMatrix(nasspmp_kinematics::ToRotationMatrix(state.orientation));
 }
 
@@ -752,7 +982,7 @@ void ProjectApolloConnectorVessel::ApplyLandedState(const ReplicatedKinematics &
 	GetStatusEx(&status);
 	status.version = 2;
 	status.flag = 0;
-	status.rbody = GetGravityRef();
+	status.rbody = state.referenceBody;
 	status.status = LandedStatus;
 	status.arot = state.landedOrientation;
 	status.surf_lng = state.surfaceLongitude;
@@ -762,11 +992,13 @@ void ProjectApolloConnectorVessel::ApplyLandedState(const ReplicatedKinematics &
 	DefSetStateEx(&status);
 }
 
-void ProjectApolloConnectorVessel::UpdateReplicatedKinematics(double simdt)
+void ProjectApolloConnectorVessel::UpdateReplicatedKinematics(double simdt, double mjd)
 {
 	if (ReplicationHubInstance.GetRole() != ReplicationRole::Replica || !hasReplicatedKinematics)
 		return;
+
 	const DWORD localFlightStatus = GetFlightStatus();
+	// Detect replica-side docking for now, later this should also be only authorized by authority
 	if (localFlightStatus & DockedFlightStatusFlag) {
 		hasReplicaIntegrationSample = false;
 		kinematicsUpdateLogPending = false;
@@ -784,39 +1016,38 @@ void ProjectApolloConnectorVessel::UpdateReplicatedKinematics(double simdt)
 		return;
 	}
 
-	const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
-
-	// Wall-clock time since message was received
-	const double elapsedSeconds = (std::max)(0.0, std::chrono::duration<double>(now - replicatedKinematics.receivedAt).count());
-	
-	// Estimated wall-clock timestamp of the transmitted state
-	// Limit real packet age, not simulation time. At 50x time acceleration a
-	// 0.5-second real-time window therefore permits up to 25 simulated seconds.
-	const double predictionAgeSeconds = (std::min)(MaximumPredictionRealAgeSeconds,
-		replicatedKinematics.messageAgeSeconds + elapsedSeconds);
-
-	// With the elapsed wall-clock time since the transmitted kinematic state we estimate the
-	// elapsed sim-time by scaling with the measured timeAcceleration
-	const double predictionSeconds = predictionAgeSeconds * replicatedKinematics.authorityTimeScale;
-	
-	// Local delta time of simulation
+	// Local delta time of simulation, can it ever get negative?
 	const double integrationStepSeconds = (std::max)(0.0, simdt);
 
-	// Rendering follows the upcoming Orbiter integration step. Predict its end
-	// before calculating the matching state which Orbiter needs at its beginning.
-	const double presentationPredictionSeconds = predictionSeconds + integrationStepSeconds;
+	// mjd names the start of the step Orbiter is about to integrate, so what ends
+	// up on screen is one step later. That's why we need to add dt. 
+	// If we would not add it, the extrapolated vessel location is dt * velocity behind.
+	// That's not cool, because at 460m/s earth ground speed on the pad, that might be 10m.
+	double renderSessionTime = 0.0;
+	const bool hasRenderTime = TryGetSessionTime(mjd, renderSessionTime);
+	if (hasRenderTime)
+		renderSessionTime += integrationStepSeconds;
+
+	const double presentationPredictionSeconds = hasRenderTime && replicatedKinematics.hasSessionTime ?
+		ClampPredictionSeconds(renderSessionTime - replicatedKinematics.sampleSessionTime) : 0.0;
 
 	// Extrapolate received state with 2nd order kinematics to compensate for the elapsed time
 	// since the host measured his state
 	nasspmp_kinematics::State target = nasspmp_kinematics::Extrapolate(
 		replicatedKinematics.state, presentationPredictionSeconds);
-	
-	const nasspmp_kinematics::State current = CurrentKinematicState();
+
+	// A body-fixed sample is predicted in the turning frame and only then expressed inertially,
+	// at the orientation the body reaches by the render date.
+	ToInertialFrame(replicatedKinematics.referenceBody, replicatedKinematics.frame, integrationStepSeconds, target);
+
+	// Measured against the sample's body
+	const nasspmp_kinematics::State current = CurrentKinematicState(replicatedKinematics.referenceBody);
 	double correctionFraction = std::nan("");
 	const int smoothCorrection = correctionActive ? 1 : 0;
 
 	// measure the acceleration that the orbiter-internal time-step uses for kinematic propagation
 	// This is used to compensate for orbiters calculations since they are not deactivatable
+	// This is a dirty trick, see also the comment in the header file
 	if (hasReplicaIntegrationSample && replicaIntegrationStepSeconds > 0.0) {
 		const VECTOR3 acceleration =
 			(current.velocity - replicaIntegrationStartVelocity) / replicaIntegrationStepSeconds;
@@ -828,28 +1059,27 @@ void ProjectApolloConnectorVessel::UpdateReplicatedKinematics(double simdt)
 	hasReplicaIntegrationSample = false;
 
 	if (correctionActive) {
-		// A cubic Hermite correction brings both position and velocity errors to zero.
-		// Matching both derivatives prevents a new authority sample from changing the
-		// vessel velocity abruptly while the positional correction remains smooth.
-		const double correctionSeconds = std::chrono::duration<double>(now - correctionStart).count();
-		const double fraction = (std::min)(1.0, (std::max)(0.0, correctionSeconds / KinematicCorrectionDurationSeconds));
-		correctionFraction = fraction;
-		const double fractionSquared = fraction * fraction;
-		const double fractionCubed = fractionSquared * fraction;
-		const double positionErrorScale = 2.0 * fractionCubed - 3.0 * fractionSquared + 1.0;
-		const double velocityErrorScale = fractionCubed - 2.0 * fractionSquared + fraction;
-		const double positionErrorDerivative = (6.0 * fractionSquared - 6.0 * fraction) / KinematicCorrectionDurationSeconds;
-		const double velocityErrorDerivative = 3.0 * fractionSquared - 4.0 * fraction + 1.0;
-		const nasspmp_kinematics::Quaternion decayingOrientationCorrection =
-			nasspmp_kinematics::Slerp(orientationCorrection, nasspmp_kinematics::Quaternion(), fraction);
-		target.position = target.position + positionCorrection * positionErrorScale +
-			velocityCorrection * (KinematicCorrectionDurationSeconds * velocityErrorScale);
-		target.velocity = target.velocity + positionCorrection * positionErrorDerivative +
-			velocityCorrection * velocityErrorDerivative;
+		// Show the target plus the offset, which is what keeps the vessel continuous across a
+		// new sample, then decay the offset over this step.
+		target.position = target.position + positionCorrection;
+		target.velocity = target.velocity + velocityCorrection;
 		target.orientation = nasspmp_kinematics::Normalize(
-			nasspmp_kinematics::Multiply(target.orientation, decayingOrientationCorrection));
-		if (fraction >= 1.0)
+			nasspmp_kinematics::Multiply(target.orientation, orientationCorrection));
+
+		DecayVisualOffset(positionCorrection, velocityCorrection, integrationStepSeconds);
+		const double decay = OffsetDecayFactor(integrationStepSeconds);
+		// Try using the same exponential decay instead of linear
+		orientationCorrection = nasspmp_kinematics::Slerp(orientationCorrection,
+			nasspmp_kinematics::Quaternion(), 1.0 - decay);
+
+		correctionFraction = length(positionCorrection);
+		if (correctionFraction < KinematicSettledOffsetMeters &&
+			length(velocityCorrection) < KinematicSettledOffsetMeters) {
+			positionCorrection = _V(0.0, 0.0, 0.0);
+			velocityCorrection = _V(0.0, 0.0, 0.0);
+			orientationCorrection = nasspmp_kinematics::Quaternion();
 			correctionActive = false;
+		}
 	}
 
 	// Feed the state into Orbiter before its physics update, while the vessel and
@@ -865,11 +1095,11 @@ void ProjectApolloConnectorVessel::UpdateReplicatedKinematics(double simdt)
 		integrationStart.orientation = nasspmp_kinematics::IntegrateOrientation(
 			target.orientation, target.angularVelocity, -integrationStepSeconds);
 	}
-	ApplyFreeFlightState(integrationStart);
+	ApplyFreeFlightState(integrationStart, replicatedKinematics.referenceBody);
 
 	if (kinematicsUpdateLogPending) {
-		LogKinematics("update", replicatedKinematics.serverTick, replicatedKinematics.flightStatus,
-			replicatedKinematics.messageAgeSeconds, elapsedSeconds, replicatedKinematics.authorityTimeScale,
+		LogKinematics("update", replicatedKinematics.sampleSessionTime, replicatedKinematics.flightStatus,
+			hasRenderTime ? renderSessionTime : std::nan(""), integrationStepSeconds,
 			presentationPredictionSeconds, correctionFraction, smoothCorrection, &replicatedKinematics.state, &current,
 			&target, &integrationStart, smoothCorrection ? &positionCorrection : NULL,
 			smoothCorrection ? &velocityCorrection : NULL,

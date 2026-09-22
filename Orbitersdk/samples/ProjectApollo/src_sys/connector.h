@@ -327,12 +327,23 @@ public:
 	const ReplicationHub &GetReplicationHub() const { return ReplicationHubInstance; }
 
 	///
-	/// This function interpolates position and orientation between host updates based on their derivatives.
-	/// Additionally it extrapolates an update based on the assumed message delay.
+	/// Converts a simulator date into the timeline shared with the authority. Together with
+	/// the timestamp an authority sample carries, this gives a prediction horizon that is a
+	/// plain difference of two exchanged timestamps, with no estimated quantity in it.
+	/// \brief Maps an Orbiter MJD onto the shared session timeline
+	/// \param mjd Orbiter date, normally the mjd argument of the current callback
+	/// \param sessionTime Receives seconds since the negotiated session epoch
+	/// \return False if shared session timeline is not available
+	///
+	bool TryGetSessionTime(double mjd, double &sessionTime) const;
+
+	///
+	/// This function extrapolates position and orientation between host updates
 	/// \brief If vessel is a replica, this prepares its predicted state for the end of the Orbiter physics step
 	/// \param simdt Orbiter integration interval following this call
+	/// \param mjd Orbiter date at the end of that interval, which is the date being rendered
 	///
-	void UpdateReplicatedKinematics(double simdt);
+	void UpdateReplicatedKinematics(double simdt, double mjd);
 
 	/// Provider block
 	const char *ComponentKey() const override;
@@ -423,20 +434,30 @@ protected:
 		double surfaceHeading = 0.0;
 		double landedAltitude = 0.0;
 		std::uint8_t flightStatus = 0;
-		SimulationTick serverTick = 0;
-		double authorityTimeScale = 1.0;
-		double messageAgeSeconds = 0.0;
-		std::chrono::steady_clock::time_point receivedAt;
+
+		// Whether position and velocity turn with the reference body or are inertial.
+		// Currently not really used (= always inertial) since replication is stable without.
+		std::uint8_t frame = 0;
+
+		// Body the authority measured position and velocity against
+		OBJHANDLE referenceBody = NULL;
+
+		// Instant the authority captured this sample, in seconds since the session epoch.
+		double sampleSessionTime = 0.0;
+		bool hasSessionTime = false;
 	};
+    
+	//////////////////////////////////////////////////
+	// Kinematic block. Maybe move to separate class?
 
 	ProviderResult ReadKinematics(const ReplicationReader &reader, ReplicatedKinematics *target, const ApplyContext &context) const;
-	nasspmp_kinematics::State CurrentKinematicState() const;
+	nasspmp_kinematics::State CurrentKinematicState(OBJHANDLE reference = NULL) const;
 	nasspmp_kinematics::State CurrentKinematicState(const VESSELSTATUS2 &status) const;
-	void ApplyFreeFlightState(const nasspmp_kinematics::State &state);
+	void ApplyFreeFlightState(const nasspmp_kinematics::State &state, OBJHANDLE reference);
 	void ApplyLandedState(const ReplicatedKinematics &state);
 	void OpenKinematicsLog(ReplicationRole role);
-	void LogKinematics(const char *event, SimulationTick serverTick, std::uint8_t flightStatus,
-		double messageAgeSeconds, double elapsedSeconds, double authorityTimeScale,
+	void LogKinematics(const char *event, double sampleSessionTime, std::uint8_t flightStatus,
+		double renderSessionTime, double stepSeconds,
 		double predictionSeconds, double correctionFraction, int smoothCorrection,
 		const nasspmp_kinematics::State *sample, const nasspmp_kinematics::State *current,
 		const nasspmp_kinematics::State *target, const nasspmp_kinematics::State *applied,
@@ -447,33 +468,42 @@ protected:
 	// If there was done a replication already and we have a valid authoritative state
 	bool hasReplicatedKinematics = false;
 
-	// Interpolation of a received position/orientation update active
+	// A visual position/orientation offset is active and is decayed smoothly towards zero
 	bool correctionActive = false;
 
 	// If the current landed state was already applied. Application of the landing state is a one-shot event
 	bool landedStateApplied = false;
 
-	// Targets for correction
+	// Difference between the state on display and the authority target. Adding it keeps the
+	// vessel continuous when a new sample arrives, a filter decays it back to zero.
 	VECTOR3 positionCorrection = {};
 	VECTOR3 velocityCorrection = {};
 	nasspmp_kinematics::Quaternion orientationCorrection;
 
-	// Starting point of correction
-	std::chrono::steady_clock::time_point correctionStart;
+	// Samples velocities to derive the total acceleration, which is supplied to the Replica to improve prediction
+	// This could maybe be calculated exactly from gravity, thrust and aerodynamic values
 
-	// Consecutive authority velocities provide an acceleration sample derived
-	// from Orbiter's actual propagation instead of a competing gravity model.
+	// TODO: Put in struct?
 	bool hasAuthorityVelocitySample = false;
-	SimulationTick authorityVelocitySampleTick = 0;
+	double authorityVelocitySampleTime = 0.0;
+	// Differencing across a change of frame or body would be dangerous.
+	std::uint8_t authorityVelocitySampleFrame = 0;
+	std::uint64_t authorityVelocitySampleBody = 0;
 	VECTOR3 authorityVelocitySample = {};
 	VECTOR3 authorityAccelerationSample = {};
 
 	// Measures the acceleration applied by Orbiter between consecutive replica PreSteps.
+	// TODO: This is a dirty trick. It predicts orbiters time step and compensates it, because for now we want
+	// the authority over the prediction to be here. Unfortunately found no way to disable orbiter kinematics from NASSP.
+	// Could later be improved by supplying correct thruster accelerations. Gravity and aerodynamics should be correct already.
+	// TODO: Put in struct?
 	bool hasReplicaIntegrationSample = false;
 	VECTOR3 replicaIntegrationStartVelocity = {};
 	double replicaIntegrationStepSeconds = 0.0;
 	bool hasReplicaOrbiterAcceleration = false;
 	VECTOR3 replicaOrbiterAcceleration = {};
+
+	// Kinematic debug
 	bool kinematicsUpdateLogPending = false;
 	FILE *kinematicsLogFile = NULL;
 	unsigned int kinematicsLogSequence = 0;

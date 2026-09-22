@@ -98,6 +98,16 @@ void ReplicationHub::SetRole(ReplicationRole newRole)
 		provider->OnRoleChanged(role);
 }
 
+const ReplicationTimeBase &ReplicationHub::GetTimeBase() const
+{
+	return timeBase;
+}
+
+void ReplicationHub::SetTimeBase(const ReplicationTimeBase &newTimeBase)
+{
+	timeBase = newTimeBase;
+}
+
 ProviderResult ReplicationHub::CaptureGroup(ComponentId componentId, ReplicationGroupId groupId, ReplicationWriter &writer, const CaptureContext &context) const
 {
 	IReplicationProvider *provider = FindProvider(componentId);

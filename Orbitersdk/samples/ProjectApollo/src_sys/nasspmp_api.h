@@ -11,13 +11,12 @@ namespace nasspmp_api
 constexpr int MessageId = 0x4E4D5001;
 namespace replication
 {
-constexpr int Version = 9;
+constexpr int Version = 11;
 constexpr std::size_t ReplicationKeyCapacity = 64;
 
 using ComponentId = std::uint32_t;
 using ReplicationGroupId = std::uint32_t;
 using Revision = std::uint64_t;
-using SimulationTick = std::uint64_t;
 
 enum class Operation : std::uint32_t
 {
@@ -32,7 +31,9 @@ enum class Operation : std::uint32_t
 	// Captures one group into a caller-owned payload buffer.
 	CaptureGroup = 4,
 	// Validates and applies a caller-owned multi-group payload batch.
-	ApplyBatch = 5
+	ApplyBatch = 5,
+	// Publishes the session epoch that every shared timestamp is measured against.
+	SetTimeBase = 6
 };
 
 enum class Result : std::uint32_t
@@ -118,10 +119,10 @@ struct Request
 	std::uint64_t schemaId = 0;
 	// Receives a provider dirty revision when GetGroupRevision succeeds.
 	std::uint64_t revision = 0;
-	// Associates a capture or apply with an authority simulation frame.
-	std::uint64_t serverTick = 0;
-	// Estimates how old an applied authority sample is at the client.
-	std::uint32_t estimatedMessageAgeMs = 0;
+	// Names an instant on the timeline both machines share.
+	double sessionTime = 0.0;
+	// Zero while no session epoch has been negotiated, which makes sessionTime meaningless.
+	std::uint32_t hasSessionTime = 0;
 	// Selects a component for single-group requests.
 	std::uint32_t componentId = 0;
 	// Selects a component-local group for single-group requests.

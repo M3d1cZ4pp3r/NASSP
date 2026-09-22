@@ -16,6 +16,8 @@ private:
 	static void ReadCatalog(ReplicationHub &hub, void *context);
 	// Propagates a negotiated entity role to the vessel's replication hub.
 	static void SetRole(ReplicationHub &hub, void *context);
+	// Publishes the negotiated session epoch all shared timestamps are measured against.
+	static void SetTimeBase(ReplicationHub &hub, void *context);
 	// Reads an optional provider dirty revision for one compact group route.
 	static void GetGroupRevision(ReplicationHub &hub, void *context);
 	// Captures one complete group payload into the caller-provided buffer.

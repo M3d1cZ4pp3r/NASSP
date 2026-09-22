@@ -7,7 +7,6 @@
 using ComponentId = nasspmp_api::replication::ComponentId;
 using ReplicationGroupId = nasspmp_api::replication::ReplicationGroupId;
 using Revision = nasspmp_api::replication::Revision;
-using SimulationTick = nasspmp_api::replication::SimulationTick;
 using ReplicationDelivery = nasspmp_api::replication::ReplicationDelivery;
 using ReplicationRole = nasspmp_api::replication::ReplicationRole;
 using ApplyPurpose = nasspmp_api::replication::ApplyPurpose;
@@ -50,10 +49,32 @@ struct ReplicationGroupDescriptor
 	std::uint32_t maximumPayloadBytes = 0;
 };
 
+// Names the timeline that authority and replica share for one session.
+//
+// Orbiter's simulation time counts from session start and is unrelated between machines,
+// so every shared timestamp is derived from the absolute MJD instead. The authority
+// announces one epoch, both sides then express instants as seconds since it. Converting a
+// frame's own MJD against this epoch yields a time directly comparable with a received
+// sample timestamp.
+struct ReplicationTimeBase
+{
+	// Reference date every shared timestamp is measured against.
+	double epochMjd = 0.0;
+	// False until the session negotiated an epoch, no shared timestamp is usable before then.
+	bool valid = false;
+
+	// Converts an Orbiter MJD into session seconds. Both operands lie within a factor of
+	// two of each other, so the subtraction itself should introduce no numerical imprecision
+	double SessionTime(double mjd) const { return (mjd - epochMjd) * 86400.0; }
+};
+
 struct CaptureContext
 {
-	// Identifies the simulator frame represented by the captured payload.
-	SimulationTick simulationTick = 0;
+	// Session time of the state being captured. During a PreStep this is the state before
+	// the upcoming integration step
+	double captureSessionTime = 0.0;
+	// False while no session epoch exists, which makes captureSessionTime meaningless.
+	bool hasSessionTime = false;
 	// Requests the complete initial state used before a replica becomes active.
 	bool isBaseline = false;
 };
@@ -62,10 +83,10 @@ struct ApplyContext
 {
 	// Distinguishes baseline restoration, authority updates and remote crew input.
 	ApplyPurpose purpose = ApplyPurpose::Baseline;
-	// Carries the authority simulator frame without exposing network identity.
-	SimulationTick serverTick = 0;
-	// Estimates sample age without requiring synchronized process clocks.
-	std::uint32_t estimatedMessageAgeMs = 0;
+	// Session time at which the authority state in this payload was valid.
+	double sampleSessionTime = 0.0;
+	// False while no session epoch exists, which makes sampleSessionTime meaningless.
+	bool hasSessionTime = false;
 };
 
 class ReplicationWriter
@@ -91,6 +112,8 @@ public:
 			return *this;
 		}
 
+		// Alternative is just cutting off, could be even intended, but could also lead
+		// to faulty replication instead of an error if the caller has a bug
 		if (std::is_signed<T>::value) {
 			const std::int64_t signedValue = static_cast<std::int64_t>(value);
 			if (bitCount < 64) {

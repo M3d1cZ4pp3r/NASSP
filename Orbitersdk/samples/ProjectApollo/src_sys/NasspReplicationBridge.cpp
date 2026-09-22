@@ -4,6 +4,7 @@
 #include "replication/ReplicationHub.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -72,6 +73,9 @@ int NasspReplicationBridge::HandleRequest(ReplicationHub &hub, int version, void
 		break;
 	case api::Operation::ApplyBatch:
 		ApplyBatch(hub, request);
+		break;
+	case api::Operation::SetTimeBase:
+		SetTimeBase(hub, request);
 		break;
 	default:
 		break;
@@ -152,6 +156,25 @@ void NasspReplicationBridge::SetRole(ReplicationHub &hub, void *context)
 	request->result = api::Result::Ok;
 }
 
+void NasspReplicationBridge::SetTimeBase(ReplicationHub &hub, void *context)
+{
+	api::Request *request = static_cast<api::Request *>(context);
+	ReplicationTimeBase timeBase;
+	timeBase.valid = request->hasSessionTime != 0;
+
+	// A non-positive or non-finite epoch would silently corrupt every later conversion,
+	// so an unusable value clears the time base instead of being stored.
+	const bool epochUsable = std::isfinite(request->sessionTime) && request->sessionTime > 0.0;
+	if (timeBase.valid && !epochUsable) {
+		request->result = api::Result::InvalidRequest;
+		return;
+	}
+
+	timeBase.epochMjd = timeBase.valid ? request->sessionTime : 0.0;
+	hub.SetTimeBase(timeBase);
+	request->result = api::Result::Ok;
+}
+
 void NasspReplicationBridge::GetGroupRevision(ReplicationHub &hub, void *context)
 {
 	api::Request *request = static_cast<api::Request *>(context);
@@ -189,7 +212,8 @@ void NasspReplicationBridge::CaptureGroup(ReplicationHub &hub, void *context)
 
 	ReplicationWriter writer(request->payload.output, request->payloadCapacity);
 	CaptureContext captureContext;
-	captureContext.simulationTick = request->serverTick;
+	captureContext.hasSessionTime = request->hasSessionTime != 0 && std::isfinite(request->sessionTime);
+	captureContext.captureSessionTime = captureContext.hasSessionTime ? request->sessionTime : 0.0;
 	captureContext.isBaseline = request->captureIsBaseline != 0;
 	const ProviderResult capture = hub.CaptureGroup(request->componentId, request->groupId, writer, captureContext);
 	if (capture == ProviderResult::Success)
@@ -238,7 +262,7 @@ void NasspReplicationBridge::ApplyBatch(ReplicationHub &hub, void *context)
 
 	ApplyContext applyContext;
 	applyContext.purpose = request->applyPurpose;
-	applyContext.serverTick = request->serverTick;
-	applyContext.estimatedMessageAgeMs = request->estimatedMessageAgeMs;
+	applyContext.hasSessionTime = request->hasSessionTime != 0 && std::isfinite(request->sessionTime);
+	applyContext.sampleSessionTime = applyContext.hasSessionTime ? request->sessionTime : 0.0;
 	request->result = ToApiResult(hub.ApplyBatch(items, applyContext));
 }

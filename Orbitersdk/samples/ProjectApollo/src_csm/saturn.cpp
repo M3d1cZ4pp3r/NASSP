@@ -2104,7 +2104,7 @@ void Saturn::clbkPreStep(double simt, double simdt, double mjd)
 
 	// Remove last frame's replicated exhaust before local replica calculations.
 	ClearReplicaThrusterLevels();
-	UpdateReplicatedKinematics(simdt);
+	UpdateReplicatedKinematics(simdt, mjd);
 	SetAnimations(simdt);
 //	UpdatePointingArrow();
 //	InitFDAICustomCamera();

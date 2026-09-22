@@ -49,6 +49,11 @@ public:
 	// Delivers a changed role exactly once to every registered provider.
 	void SetRole(ReplicationRole role);
 
+	// Returns the session timeline this entity currently shares with the authority.
+	const ReplicationTimeBase &GetTimeBase() const;
+	// Publishes the negotiated session epoch, or invalidates it when the session ends.
+	void SetTimeBase(const ReplicationTimeBase &timeBase);
+
 	// Routes a capture request after confirming that both compact IDs are known.
 	ProviderResult CaptureGroup(ComponentId componentId, ReplicationGroupId groupId, ReplicationWriter &writer, const CaptureContext &context) const;
 	// Returns an optional provider revision for centrally scheduled group capture.
@@ -74,4 +79,6 @@ private:
 	bool catalogSealed = false;
 	// Every provider of one entity observes the same replication role.
 	ReplicationRole role = ReplicationRole::Standalone;
+	// The session timeline is a session constant, so it is stored rather than queried.
+	ReplicationTimeBase timeBase;
 };
