@@ -34,6 +34,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     User32
     Orbiter
     Orbitersdk
+    Replication
     WinMM
     WS2_32
 )

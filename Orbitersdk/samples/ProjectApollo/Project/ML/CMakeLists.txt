@@ -34,5 +34,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE ${INCLUDE_DIRS})
 target_link_libraries(${PROJECT_NAME} PRIVATE
     Orbiter
     Orbitersdk
+    Replication
     XRSound
 )

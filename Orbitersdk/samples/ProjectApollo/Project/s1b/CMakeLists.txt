@@ -29,5 +29,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     Orbiter
     Orbitersdk
     PanelSDK
+    Replication
     XRSound
 )

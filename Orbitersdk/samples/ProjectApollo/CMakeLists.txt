@@ -31,14 +31,6 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(NASSP_SOURCE_ROOT ${CMAKE_SOURCE_DIR})
 set(NASSP_REPO_ROOT ${NASSP_SOURCE_ROOT}/../../../)
 
-# Replication state belongs to the common vessel base and is linked by every module that embeds it.
-add_library(NasspReplication STATIC
-    ${NASSP_SOURCE_ROOT}/src_sys/replication/ReplicationCatalog.cpp
-    ${NASSP_SOURCE_ROOT}/src_sys/replication/ReplicationHub.cpp
-    ${NASSP_SOURCE_ROOT}/src_sys/replication/ReplicationTypes.cpp
-)
-target_include_directories(NasspReplication PUBLIC ${NASSP_SOURCE_ROOT}/src_sys)
-
 # Check if the user has specified a non-default Orbiter installation location.
 # If not, use the default and alert the user.
 set(ORBITER_INSTALL_DIR ${NASSP_REPO_ROOT} CACHE STRING "Location of OpenOrbiter installation directory")
@@ -105,6 +97,7 @@ add_subdirectory(Project/ML)
 add_subdirectory(Project/MSS)
 add_subdirectory(Project/ProjectApolloConfigurator)
 add_subdirectory(Project/ProjectApolloMFD)
+add_subdirectory(Project/Replication)
 add_subdirectory(Project/Saturn1B)
 add_subdirectory(Project/Saturn5)
 add_subdirectory(Project/s1b)
@@ -120,22 +113,6 @@ add_subdirectory(Project/SIVB)
 add_subdirectory(Project/Skylab)
 add_subdirectory(Project/sm)
 add_subdirectory(Project/VAB)
-
-set(NASSP_REPLICATION_MODULES
-    ASTP
-    LEM
-    ML
-    ProjectApolloMFD
-    SIVB
-    Saturn1B
-    Saturn5
-    Skylab
-    s1b
-    s1c
-)
-foreach(module IN LISTS NASSP_REPLICATION_MODULES)
-    target_link_libraries(${module} PRIVATE NasspReplication)
-endforeach()
 
 
 # Copy all relevant documents/scenarios/sounds/configs from this
