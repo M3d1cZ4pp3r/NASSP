@@ -1,0 +1,89 @@
+# Builds NASSP together with the NASSP-MP plugin revision pinned in .github/nassp-mp.ref,
+# runs the NASSP-MP tests with strict checks and publishes both as one zipped release.
+name: NASSP-MP build
+
+on:
+  #push:
+    #branches: [ "replication" ]
+  workflow_dispatch:
+    inputs:
+      nassp_mp_ref:
+        description: "NASSP-MP commit, tag or branch (default: .github/nassp-mp.ref)"
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{github.token}}
+  BUILD_TYPE: RelWithDebInfo
+  BUILD_NAME: NASSP-V9.0-Multiplayer-Orbiter2024-${{github.run_number}}
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        path: nassp
+
+    - name: Read pinned NASSP-MP revision
+      id: pin
+      run: echo "ref=$((Get-Content nassp/.github/nassp-mp.ref -Raw).Trim())" >> $env:GITHUB_OUTPUT
+
+    - uses: actions/checkout@v6
+      with:
+        repository: ${{github.repository_owner}}/NASSP-MP
+        ref: ${{inputs.nassp_mp_ref || steps.pin.outputs.ref}}
+        path: nassp-mp
+
+    - name: Check dependency cache for Orbiter 2024 x64
+      uses: actions/cache@v5
+      id: cache
+      with:
+        path: ${{github.workspace}}/Orbiter2024-x64.zip
+        key: O2024-x64-zip
+
+    - name: Download Orbiter 2024 x64 if not cached
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: Invoke-WebRequest -Uri https://github.com/orbitersim/orbiter/releases/download/2024/Orbiter-x64.zip -OutFile ${{github.workspace}}/Orbiter2024-x64.zip
+
+    - name: Extract Orbiter
+      run: Expand-Archive -Force ${{github.workspace}}/Orbiter2024-x64.zip ${{github.workspace}}/Orbiter2024
+
+    - name: Configure NASSP
+      run: cmake -DORBITER_INSTALL_DIR:STRING="${{github.workspace}}/Orbiter2024" -DFINAL_INSTALL_DIR:STRING="${{github.workspace}}/install" -B ${{github.workspace}}/build-nassp -G "Visual Studio 18 2026" -A x64 ${{github.workspace}}/nassp/Orbitersdk/samples/ProjectApollo/
+
+    - name: Build NASSP
+      run: cmake --build ${{github.workspace}}/build-nassp --config ${{env.BUILD_TYPE}} -j 4
+
+    - name: Install NASSP
+      run: cmake --install ${{github.workspace}}/build-nassp --config ${{env.BUILD_TYPE}}
+
+    - name: Configure NASSP-MP
+      run: cmake -DNASSPMP_BUILD_PLUGIN=ON -DNASSPMP_STRICT_CHECKS=ON -DORBITER_SDK_ROOT="${{github.workspace}}/Orbiter2024/Orbitersdk" -B ${{github.workspace}}/build-mp -G "Visual Studio 18 2026" -A x64 ${{github.workspace}}/nassp-mp
+
+    - name: Build NASSP-MP
+      run: cmake --build ${{github.workspace}}/build-mp --config ${{env.BUILD_TYPE}} -j 4
+
+    - name: Test NASSP-MP
+      run: ctest --test-dir ${{github.workspace}}/build-mp -C ${{env.BUILD_TYPE}} --output-on-failure
+
+    - name: Install NASSP-MP plugin
+      run: Copy-Item ${{github.workspace}}/build-mp/plugin/${{env.BUILD_TYPE}}/NASSP-MP.dll ${{github.workspace}}/install/Modules/Plugin
+
+
+    - name: Write version file
+      run: |
+        $version = "${{ env.BUILD_NAME }}"
+        @"
+        $version
+        "@ | Out-File -Encoding UTF8 "${{ github.workspace }}/install/NASSP_VERSION.txt"
+
+    - name: Zip output directory
+      run: Compress-Archive -Path ${{github.workspace}}/install/* -DestinationPath ${{github.workspace}}/${{env.BUILD_NAME}}-x64.zip -Force
+
+    - name: Create GitHub release and tag
+      working-directory: nassp
+      run: gh release create ${{env.BUILD_NAME}} ${{github.workspace}}/${{env.BUILD_NAME}}-x64.zip --target ${{github.sha}}
