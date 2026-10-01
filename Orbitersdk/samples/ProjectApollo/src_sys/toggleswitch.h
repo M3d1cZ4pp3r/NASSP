@@ -96,6 +96,9 @@ constexpr PanelReplicationValue PanelReplicationStateMask = UINT64_C(0x00000000F
 constexpr PanelReplicationValue PanelReplicationHeld = UINT64_C(0x4000000000000000);
 constexpr PanelReplicationValue PanelReplicationGuard = UINT64_C(0x8000000000000000);
 
+// Returns the smallest number of state bits that can represent every state from zero to maximumState.
+unsigned int ReplicationBitsForMaximum(PanelReplicationValue maximumState);
+
 class PanelSwitchCallbackInterface;
 ///
 /// This is the base class for panel items. Items using this class can be looked up by name,
@@ -232,9 +235,9 @@ public:
 	///
 	/// \brief Get the current value used for replication.
 	/// \param value Receives the current value.
-	/// \return True if the value was captured successfully.
+	/// \return True if the value is available.
 	///
-	virtual bool CaptureReplicationValue(PanelReplicationValue &value);
+	virtual bool GetReplicationValue(PanelReplicationValue &value);
 
 	///
 	/// \brief Write the current value to a replication payload.
@@ -252,34 +255,11 @@ public:
 	virtual bool ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const;
 
 	///
-	/// \brief Get the number of bits used for the item's state.
-	/// \return Number of bits used for the state value.
+	/// \brief Get the number of bits this item writes to a replication payload.
+	/// The default replicates the complete value; items with a smaller value range reduce it.
+	/// \return Number of payload bits for this item.
 	///
-	virtual unsigned int ReplicationStateBitCount() const;
-
-	///
-	/// \brief Check whether the payload includes the held setting.
-	/// \return True if the held setting is included.
-	///
-	virtual bool ReplicatesHeldState() const;
-
-	///
-	/// \brief Check whether the payload includes the guard state.
-	/// \return True if the guard state is included.
-	///
-	virtual bool ReplicatesGuardState() const;
-
-	///
-	/// \brief Get the largest number of bits this item can write.
-	/// \return Maximum number of bits written for this item.
-	///
-	virtual unsigned int MaximumReplicationBits() const;
-
-	///
-	/// \brief Get the largest state accepted from a replication payload.
-	/// \return Largest accepted state value.
-	///
-	virtual std::uint32_t MaximumReplicationState() const;
+	virtual unsigned int ReplicationBitCount() const;
 
 	///
 	/// \brief Check a received value without changing the item.
@@ -490,16 +470,25 @@ public:
 	virtual void SetState(int value); //Needed to properly process set states from toggle switches.
 	void ApplyRemoteInput(int value);
 	void ApplyReplicatedState(int value);
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool GetReplicationValue(PanelReplicationValue &value) override;
+	bool WriteReplicationValue(ReplicationWriter &writer) override;
+	bool ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
-	unsigned int ReplicationStateBitCount() const override { return 1; }
-	bool ReplicatesHeldState() const override { return springLoaded != SPRINGLOADEDSWITCH_NONE; }
-	std::uint32_t MaximumReplicationState() const override { return 1; }
+	// Switch position bits plus the held and guard bits; derived switches change only the position bits.
+	unsigned int ReplicationBitCount() const final;
+	virtual bool ReplicatesHeldState() const { return springLoaded != SPRINGLOADEDSWITCH_NONE; }
+	virtual bool ReplicatesGuardState() const { return false; }
+	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
+	// Largest switch position accepted from a replication payload.
+	virtual std::uint32_t MaximumReplicationState() const { return 1; }
 	virtual void timestep(double missionTime);
 	virtual void DefineMeshGroup(UINT _grpIndex);
 
 protected:
 	virtual bool IsSpringReturn(int newState) const;
+
+	// Number of bits for the switch position in a replication payload.
+	virtual unsigned int ReplicationSwitchValueBitCount() const { return 1; }
 
 	virtual void InitSound(SoundLib *s);
 	virtual void DoDrawSwitch(SURFHANDLE DrawSurface);
@@ -619,7 +608,6 @@ protected:
 class ThreePosSwitch: public ToggleSwitch {
 
 public:
-	unsigned int ReplicationStateBitCount() const override { return 2; }
 	std::uint32_t MaximumReplicationState() const override { return 2; }
 	void DrawSwitch(SURFHANDLE DrawSurface);
 	void DrawSwitchVC(int id, int event, SURFHANDLE drawSurface);
@@ -634,6 +622,7 @@ public:
 
 protected:
 	bool IsSpringReturn(int newState) const override;
+	unsigned int ReplicationSwitchValueBitCount() const override { return 2; }
 };
 
 ///
@@ -645,7 +634,6 @@ protected:
 class FivePosSwitch: public ToggleSwitch {
 
 public:
-	unsigned int ReplicationStateBitCount() const override { return 3; }
 	std::uint32_t MaximumReplicationState() const override { return 4; }
 	FivePosSwitch();
 	virtual ~FivePosSwitch();
@@ -665,6 +653,7 @@ public:
 	bool IsRight() { return (GetState() == FIVEPOSSWITCH_RIGHT); };
 protected:
 	bool IsSpringReturn(int newState) const override;
+	unsigned int ReplicationSwitchValueBitCount() const override { return 3; }
 	MGROUP_ROTATE* pswitchroty;
 	UINT anim_switchy;
 	VECTOR3 diry;
@@ -1125,7 +1114,7 @@ public:
 			NotifyReplicationValueChanged();
 		}
 	};
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool GetReplicationValue(PanelReplicationValue &value) override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
@@ -1266,7 +1255,7 @@ public:
 			NotifyReplicationValueChanged();
 		}
 	};
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool GetReplicationValue(PanelReplicationValue &value) override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
@@ -1325,7 +1314,7 @@ public:
 			NotifyReplicationValueChanged();
 		}
 	};
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool GetReplicationValue(PanelReplicationValue &value) override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	bool ReplicatesGuardState() const override { return true; }
 	void SetGuardResetsState(bool s) { guardResetsState = s; };
@@ -1379,7 +1368,7 @@ public:
 	// Sets the continuous position shown by a replica.
 	bool SetReplicatedValue(double value);
 	PanelReplicationValueType GetReplicationValueType() const override;
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	bool GetReplicationValue(PanelReplicationValue &value) override;
 	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	//Returns animation state (0-1), could be overloaded to provide output voltage
@@ -1508,8 +1497,10 @@ public:
 	operator int();
 	virtual void SetState(int value);
 	void ApplyReplicatedState(int value);
-	unsigned int ReplicationStateBitCount() const override;
-	std::uint32_t MaximumReplicationState() const override;
+	unsigned int ReplicationBitCount() const override;
+	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
+	// Largest position value accepted from a replication payload.
+	std::uint32_t MaximumReplicationState() const;
 	void SoundEnabled(bool on) { soundEnabled = on; };
 	void SetWraparound(bool w) { Wraparound = w; };
 
@@ -1587,9 +1578,9 @@ public:
 	virtual void SetState(int s) { state = s; };
 	int GetDisplayState() const { return (int)displayState; };
 	PanelReplicationValueType GetReplicationValueType() const override;
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
-	unsigned int ReplicationStateBitCount() const override { return 2; }
-	std::uint32_t MaximumReplicationState() const override { return 3; }
+	bool GetReplicationValue(PanelReplicationValue &value) override;
+	unsigned int ReplicationBitCount() const override { return 2; }
+	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	void SetReplicationPresentationActive(bool active) override;
 
@@ -1629,8 +1620,10 @@ public:
 	void LoadState(char *line);
 	double GetDisplayValue();
 	double GetCurrentDisplayValue() const { return displayValue; };
+
 	PanelReplicationValueType GetReplicationValueType() const override;
-	bool CaptureReplicationValue(PanelReplicationValue &value) override;
+	unsigned int ReplicationBitCount() const override;
+	bool GetReplicationValue(PanelReplicationValue &value) override;
 	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
 	void ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose) override;
 	void SetReplicationPresentationActive(bool active) override;
@@ -1714,6 +1707,8 @@ public:
 //	operator int();
 	virtual void SetState(int value);
 	void ApplyReplicatedState(int value);
+	unsigned int ReplicationBitCount() const override;
+	bool ValidateReplicationValue(PanelReplicationValue valueBits) const override;
 
 	void DefineVCAnimations(UINT vc_idx);
 	void DefineMeshGroup(UINT _grpIndex);

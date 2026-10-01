@@ -88,10 +88,7 @@ std::uint64_t PanelControlProvider::GroupSchemaId(const std::vector<Control> &co
 	for (const Control &control : controls) {
 		schema.AddString(control.key.c_str());
 		schema.AddUint32(static_cast<std::uint32_t>(control.item->GetReplicationValueType()));
-		schema.AddUint32(control.item->ReplicationStateBitCount());
-		schema.AddUint32(control.item->MaximumReplicationState());
-		schema.AddUint32(control.item->ReplicatesHeldState() ? 1 : 0);
-		schema.AddUint32(control.item->ReplicatesGuardState() ? 1 : 0);
+		schema.AddUint32(control.item->ReplicationBitCount());
 	}
 	return schema.SchemaId();
 }
@@ -100,7 +97,7 @@ std::uint32_t PanelControlProvider::MaximumPayloadBytes(const std::vector<Contro
 {
 	std::uint32_t maximumBits = 0;
 	for (const Control &control : controls)
-		maximumBits += control.item->MaximumReplicationBits();
+		maximumBits += control.item->ReplicationBitCount();
 	return (maximumBits + 7) / 8;
 }
 

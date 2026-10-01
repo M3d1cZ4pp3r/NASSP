@@ -136,7 +136,7 @@ PanelReplicationValueType PanelSwitchItem::GetReplicationValueType() const
 	return PanelReplicationValueType::DiscreteInput;
 }
 
-bool PanelSwitchItem::CaptureReplicationValue(PanelReplicationValue &valueBits)
+bool PanelSwitchItem::GetReplicationValue(PanelReplicationValue &valueBits)
 {
 	valueBits = static_cast<PanelReplicationValue>(GetState());
 	return true;
@@ -145,87 +145,36 @@ bool PanelSwitchItem::CaptureReplicationValue(PanelReplicationValue &valueBits)
 bool PanelSwitchItem::WriteReplicationValue(ReplicationWriter &writer)
 {
 	PanelReplicationValue value = 0;
-	const bool captured = CaptureReplicationValue(value);
-	if (!captured)
+	const bool available = GetReplicationValue(value);
+	if (!available)
 		return false;
 
-	const PanelReplicationValueType type = GetReplicationValueType();
-	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation) {
-		const std::uint32_t stateValue = static_cast<std::uint32_t>(value & PanelReplicationStateMask);
-		writer.WriteScalar(stateValue, ReplicationStateBitCount());
-		if (ReplicatesHeldState())
-			writer.WriteScalar((value & PanelReplicationHeld) != 0);
-		if (ReplicatesGuardState())
-			writer.WriteScalar((value & PanelReplicationGuard) != 0);
-		return static_cast<bool>(writer);
-	}
-	writer.WriteScalar(value);
+	writer.WriteScalar(value, ReplicationBitCount());
 	return static_cast<bool>(writer);
 }
 
 bool PanelSwitchItem::ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const
 {
-	const PanelReplicationValueType type = GetReplicationValueType();
-	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation) {
-		std::uint32_t stateValue = 0;
-		reader.ReadScalar(stateValue, ReplicationStateBitCount());
-
-		value = stateValue;
-		bool flag = false;
-		if (ReplicatesHeldState()) {
-			reader.ReadScalar(flag);
-			if (flag)
-				value |= PanelReplicationHeld;
-		}
-		if (ReplicatesGuardState()) {
-			reader.ReadScalar(flag);
-			if (flag)
-				value |= PanelReplicationGuard;
-		}
-		return static_cast<bool>(reader);
-	}
-	reader.ReadScalar(value);
+	reader.ReadScalar(value, ReplicationBitCount());
 	return static_cast<bool>(reader);
 }
 
-unsigned int PanelSwitchItem::ReplicationStateBitCount() const
+unsigned int PanelSwitchItem::ReplicationBitCount() const
 {
-	return 32;
-}
-
-bool PanelSwitchItem::ReplicatesHeldState() const
-{
-	return false;
-}
-
-bool PanelSwitchItem::ReplicatesGuardState() const
-{
-	return false;
-}
-
-unsigned int PanelSwitchItem::MaximumReplicationBits() const
-{
-	const PanelReplicationValueType type = GetReplicationValueType();
-	if (type == PanelReplicationValueType::DiscreteInput || type == PanelReplicationValueType::IndicatorPresentation)
-		return ReplicationStateBitCount() + (ReplicatesHeldState() ? 1 : 0) + (ReplicatesGuardState() ? 1 : 0);
-	if (type == PanelReplicationValueType::Excluded)
-		return 0;
 	return sizeof(PanelReplicationValue) * 8;
 }
 
-std::uint32_t PanelSwitchItem::MaximumReplicationState() const
+bool PanelSwitchItem::ValidateReplicationValue(PanelReplicationValue) const
 {
-	return UINT32_MAX;
+	return false;
 }
 
-bool PanelSwitchItem::ValidateReplicationValue(std::uint64_t valueBits) const
+unsigned int ReplicationBitsForMaximum(PanelReplicationValue maximumState)
 {
-	PanelReplicationValue allowedBits = PanelReplicationStateMask;
-	if (ReplicatesHeldState())
-		allowedBits |= PanelReplicationHeld;
-	if (ReplicatesGuardState())
-		allowedBits |= PanelReplicationGuard;
-	return (valueBits & ~allowedBits) == 0 && (valueBits & PanelReplicationStateMask) <= MaximumReplicationState();
+	unsigned int bitCount = 1;
+	while (bitCount < sizeof(PanelReplicationValue) * 8 && maximumState >= (PanelReplicationValue(1) << bitCount))
+		bitCount++;
+	return bitCount;
 }
 
 void PanelSwitchItem::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
@@ -662,12 +611,51 @@ bool FivePosSwitch::IsSpringReturn(int newState) const
 	return false;
 }
 
-bool TwoPositionSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+bool TwoPositionSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
 {
-	PanelSwitchItem::CaptureReplicationValue(valueBits);
+	PanelSwitchItem::GetReplicationValue(valueBits);
 	if (IsHeld())
 		valueBits |= PanelReplicationHeld;
 	return true;
+}
+
+bool TwoPositionSwitch::WriteReplicationValue(ReplicationWriter &writer)
+{
+	PanelReplicationValue value = 0;
+	const bool available = GetReplicationValue(value);
+	if (!available)
+		return false;
+
+	// The switch position is written without the flag bits, which follow as separate bits
+	writer.WriteScalar(value & ~(PanelReplicationHeld | PanelReplicationGuard), ReplicationSwitchValueBitCount());
+	if (ReplicatesHeldState())
+		writer.WriteScalar((value & PanelReplicationHeld) != 0);
+	if (ReplicatesGuardState())
+		writer.WriteScalar((value & PanelReplicationGuard) != 0);
+	return static_cast<bool>(writer);
+}
+
+bool TwoPositionSwitch::ReadReplicationValue(const ReplicationReader &reader, PanelReplicationValue &value) const
+{
+	reader.ReadScalar(value, ReplicationSwitchValueBitCount());
+
+	bool flag = false;
+	if (ReplicatesHeldState()) {
+		reader.ReadScalar(flag);
+		if (flag)
+			value |= PanelReplicationHeld;
+	}
+	if (ReplicatesGuardState()) {
+		reader.ReadScalar(flag);
+		if (flag)
+			value |= PanelReplicationGuard;
+	}
+	return static_cast<bool>(reader);
+}
+
+unsigned int TwoPositionSwitch::ReplicationBitCount() const
+{
+	return ReplicationSwitchValueBitCount() + (ReplicatesHeldState() ? 1 : 0) + (ReplicatesGuardState() ? 1 : 0);
 }
 
 void TwoPositionSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
@@ -676,9 +664,15 @@ void TwoPositionSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, A
 	PanelSwitchItem::ApplyReplicationValue(valueBits & PanelReplicationStateMask, purpose);
 }
 
-bool GuardedToggleSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+bool TwoPositionSwitch::ValidateReplicationValue(PanelReplicationValue valueBits) const
 {
-	TwoPositionSwitch::CaptureReplicationValue(valueBits);
+	// The state bits may encode more positions than the switch provides
+	return (valueBits & PanelReplicationStateMask) <= MaximumReplicationState();
+}
+
+bool GuardedToggleSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
+{
+	TwoPositionSwitch::GetReplicationValue(valueBits);
 	if (GetGuardState())
 		valueBits |= PanelReplicationGuard;
 	return true;
@@ -693,9 +687,9 @@ void GuardedToggleSwitch::ApplyReplicationValue(PanelReplicationValue valueBits,
 		guardClick.play();
 }
 
-bool GuardedPushSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+bool GuardedPushSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
 {
-	TwoPositionSwitch::CaptureReplicationValue(valueBits);
+	TwoPositionSwitch::GetReplicationValue(valueBits);
 	if (GetGuardState())
 		valueBits |= PanelReplicationGuard;
 	return true;
@@ -710,9 +704,9 @@ void GuardedPushSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, A
 		guardClick.play();
 }
 
-bool GuardedThreePosSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+bool GuardedThreePosSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
 {
-	TwoPositionSwitch::CaptureReplicationValue(valueBits);
+	TwoPositionSwitch::GetReplicationValue(valueBits);
 	if (GetGuardState())
 		valueBits |= PanelReplicationGuard;
 	return true;
@@ -2666,9 +2660,9 @@ ContinuousSwitch::~ContinuousSwitch()
 
 void ContinuousSwitch::Register(PanelSwitchScenarioHandler &scnh, char *n, double defaultVal, double minVal, double maxVal)
 {
-	//defaultValue: default display value (e.g. 0ï¿½)
-	//minValue: minimum displayed value (e.g. -4ï¿½)
-	//maxValue: maximum displayed value (e.g. +4ï¿½)
+	//defaultValue: default display value (e.g. 0°)
+	//minValue: minimum displayed value (e.g. -4°)
+	//maxValue: maximum displayed value (e.g. +4°)
 	//maxState: maximum number of bitmap positions
 
 	minValue = minVal;
@@ -2722,21 +2716,21 @@ PanelReplicationValueType ContinuousSwitch::GetReplicationValueType() const
 	return PanelReplicationValueType::ContinuousInput;
 }
 
-bool ContinuousSwitch::CaptureReplicationValue(std::uint64_t &valueBits)
+bool ContinuousSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
 {
 	const double value = GetValue();
 	std::memcpy(&valueBits, &value, sizeof(value));
 	return true;
 }
 
-bool ContinuousSwitch::ValidateReplicationValue(std::uint64_t valueBits) const
+bool ContinuousSwitch::ValidateReplicationValue(PanelReplicationValue valueBits) const
 {
 	double value = 0;
 	std::memcpy(&value, &valueBits, sizeof(value));
 	return value == value && value >= minValue && value <= maxValue;
 }
 
-void ContinuousSwitch::ApplyReplicationValue(std::uint64_t valueBits, ApplyPurpose purpose)
+void ContinuousSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose purpose)
 {
 	double value = 0;
 	std::memcpy(&value, &valueBits, sizeof(value));
@@ -2751,9 +2745,15 @@ PanelReplicationValueType IndicatorSwitch::GetReplicationValueType() const
 	return PanelReplicationValueType::IndicatorPresentation;
 }
 
-bool IndicatorSwitch::CaptureReplicationValue(PanelReplicationValue &valueBits)
+bool IndicatorSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
 {
 	valueBits = static_cast<PanelReplicationValue>(QueryTargetState());
+	return true;
+}
+
+bool IndicatorSwitch::ValidateReplicationValue(PanelReplicationValue) const
+{
+	// The two state bits cover exactly the four display states
 	return true;
 }
 
@@ -2772,25 +2772,39 @@ PanelReplicationValueType MeterSwitch::GetReplicationValueType() const
 	return PanelReplicationValueType::MeterPresentation;
 }
 
-bool MeterSwitch::CaptureReplicationValue(std::uint64_t &valueBits)
+// Meters replicate their display position as a fixed-point fraction of the display range.
+const unsigned int MeterReplicationBits = 16;
+const PanelReplicationValue MeterReplicationMaximum = (PanelReplicationValue(1) << MeterReplicationBits) - 1;
+
+unsigned int MeterSwitch::ReplicationBitCount() const
 {
-	const double value = GetCurrentDisplayValue();
-	std::memcpy(&valueBits, &value, sizeof(value));
+	return MeterReplicationBits;
+}
+
+bool MeterSwitch::GetReplicationValue(PanelReplicationValue &valueBits)
+{
+	const double range = maxValue - minValue;
+	double fraction = range > 0.0 ? (GetCurrentDisplayValue() - minValue) / range : 0.0;
+	if (!(fraction >= 0.0))
+		fraction = 0.0;
+	if (fraction > 1.0)
+		fraction = 1.0;
+
+	// Round by adding 0.5
+	valueBits = static_cast<PanelReplicationValue>(fraction * MeterReplicationMaximum + 0.5);
 	return true;
 }
 
-bool MeterSwitch::ValidateReplicationValue(std::uint64_t valueBits) const
+bool MeterSwitch::ValidateReplicationValue(PanelReplicationValue) const
 {
-	double value = 0;
-	std::memcpy(&value, &valueBits, sizeof(value));
-	return value == value;
+	// Every fixed-point state maps into the display range
+	return true;
 }
 
-void MeterSwitch::ApplyReplicationValue(std::uint64_t valueBits, ApplyPurpose)
+void MeterSwitch::ApplyReplicationValue(PanelReplicationValue valueBits, ApplyPurpose)
 {
-	double value = 0;
-	std::memcpy(&value, &valueBits, sizeof(value));
-	replicatedDisplayValue = value;
+	const double fraction = static_cast<double>(valueBits) / MeterReplicationMaximum;
+	replicatedDisplayValue = minValue + fraction * (maxValue - minValue);
 }
 
 void MeterSwitch::SetReplicationPresentationActive(bool active)
@@ -3133,7 +3147,7 @@ void ContinuousRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface)
 	{
 		srcx -= maxState;
 	}
-	//Default bitmap has alternating 15ï¿½ positions up and down
+	//Default bitmap has alternating 15° positions up and down
 	int srcx2, srcy;
 	if (maxState > 12)
 	{
@@ -3394,13 +3408,14 @@ void RotationalSwitch::AddPosition(int value, double angle) {
 	}
 }
 
-unsigned int RotationalSwitch::ReplicationStateBitCount() const
+unsigned int RotationalSwitch::ReplicationBitCount() const
 {
-	unsigned int bitCount = 1;
-	const std::uint32_t maximumState = MaximumReplicationState();
-	while (bitCount < 32 && maximumState >= (std::uint32_t(1) << bitCount))
-		bitCount++;
-	return bitCount;
+	return ReplicationBitsForMaximum(MaximumReplicationState());
+}
+
+bool RotationalSwitch::ValidateReplicationValue(PanelReplicationValue valueBits) const
+{
+	return valueBits <= MaximumReplicationState();
 }
 
 std::uint32_t RotationalSwitch::MaximumReplicationState() const
@@ -3731,7 +3746,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 
 		switch (rotstate)
 		{
-		case 0: //-120ï¿½
+		case 0: //-120°
 			rt.left = 29 + x;
 			rt.top = 24 + y;
 			rt.right = 60 + x;
@@ -3739,7 +3754,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(44 + x, 28 + y, label, strlen(label));
 			break;
-		case 1: //-90ï¿½
+		case 1: //-90°
 			rt.left = 35 + x;
 			rt.top = 30 + y;
 			rt.right = 59 + x;
@@ -3747,7 +3762,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(49 + x, 31 + y, label, strlen(label));
 			break;
-		case 2: //-60ï¿½
+		case 2: //-60°
 			rt.left = 32 + x;
 			rt.top = 29 + y;
 			rt.right = 63 + x;
@@ -3755,7 +3770,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(47 + x, 34 + y, label, strlen(label));
 			break;
-		case 3: //-30ï¿½
+		case 3: //-30°
 			rt.left = 29 + x;
 			rt.top = 29 + y;
 			rt.right = 60 + x;
@@ -3763,7 +3778,7 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(44 + x, 34 + y, label, strlen(label));
 			break;
-		case 4: //0ï¿½
+		case 4: //0°
 			rt.left = 29 + x;
 			rt.top = 35 + y;
 			rt.right = 57 + x;
@@ -3771,8 +3786,8 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(42 + x, 36 + y, label, strlen(label));
 			break;
-		case 5: //30ï¿½
-		case 6: //60ï¿½
+		case 5: //30°
+		case 6: //60°
 			rt.left = 28 + x;
 			rt.top = 30 + y;
 			rt.right = 54 + x;
@@ -3780,11 +3795,11 @@ void OrdealRotationalSwitch::DrawSwitch(SURFHANDLE drawSurface) {
 			skp->Rectangle(rt.left, rt.top, rt.right, rt.bottom);
 			skp->Text(37 + x, 34 + y, label, strlen(label));
 			break;
-		case 7: //90ï¿½
+		case 7: //90°
 			skp->Text(32 + x, 31 + y, label, strlen(label));
 			break;
-		case 8: //120ï¿½
-		case 9: //150ï¿½
+		case 8: //120°
+		case 9: //150°
 			rt.left = 25 + x;
 			rt.top = 24 + y;
 			rt.right = 55 + x;
@@ -4032,6 +4047,16 @@ void ThumbwheelSwitch::ApplyReplicatedState(int value)
 		state = value;
 		NotifyReplicationValueChanged();
 	}
+}
+
+unsigned int ThumbwheelSwitch::ReplicationBitCount() const
+{
+	return ReplicationBitsForMaximum(maxState < 0 ? 0 : static_cast<PanelReplicationValue>(maxState));
+}
+
+bool ThumbwheelSwitch::ValidateReplicationValue(PanelReplicationValue valueBits) const
+{
+	return maxState >= 0 && valueBits <= static_cast<PanelReplicationValue>(maxState);
 }
 
 //
@@ -6175,7 +6200,7 @@ void VCPointingArrow::Timestep(int PointingArrowidx, DEVMESHHANDLE hArrowMesh, c
 	}
 
 	if (!oapiGetPause()) {
-		rotationangle += oapiGetSimStep() / oapiGetTimeAcceleration() * -90;  // Rotate 360ï¿½ every 4 Second
+		rotationangle += oapiGetSimStep() / oapiGetTimeAcceleration() * -90;  // Rotate 360° every 4 Second
 		if (rotationangle > 360) rotationangle = 0;
 		rad = rotationangle * PI / 180.0;
 		cos_a = std::cos(rad);
